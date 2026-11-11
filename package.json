@@ -1,0 +1,10 @@
+{
+  "name": "web-wizards-sales-os",
+  "private": true,
+  "type": "module",
+  "description": "Web Wizards Sales OS. Sin dependencias de npm: Python estándar + Node (node:sqlite, node:test). Ver README.md.",
+  "scripts": {
+    "test": "bin/ww test",
+    "dev": "bin/ww dev"
+  }
+}

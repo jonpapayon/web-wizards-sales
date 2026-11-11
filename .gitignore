@@ -1,0 +1,45 @@
+# Secretos: nunca en el repositorio
+.env
+.env.*
+*.pem
+*.key
+credentials*.json
+service-account*.json
+token*.json
+
+# Datos de prospectos (contienen información de contacto; respaldar fuera del repo)
+data/crm/*.csv
+!data/crm/.gitkeep
+data/research/*
+!data/research/.gitkeep
+data/outreach/*
+!data/outreach/.gitkeep
+data/staging/*
+!data/staging/.gitkeep
+data/reports/*
+!data/reports/.gitkeep
+
+.DS_Store
+data/crm/.lock
+data/crm/.*.tmp
+data/crm/audit.jsonl
+data/exports/
+demo/
+backups/
+tests/artifacts/
+__pycache__/
+!.env.example
+# D1 local, seeds con datos de contacto y secretos locales
+data/d1/
+cloudflare/seed/*.sql
+cloudflare/seed/*.manifest.json
+.dev.vars
+integrations/n8n/.env
+data/research/capturas/
+.wrangler/
+node_modules/
+
+# Artefactos locales: capturas del navegador de verificación y exportaciones DNS
+.playwright-mcp/
+*.zone.txt
+webwizards.click.txt

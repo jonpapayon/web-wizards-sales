@@ -1,0 +1,26 @@
+# n8n Community autohospedado para Web Wizards Sales OS. Solo escucha en 127.0.0.1 (este Mac).
+# Iniciar: bin/ww n8n   (requiere Docker Desktop o compatible; alternativa sin Docker: npx n8n)
+# Secretos en integrations/n8n/.env (no versionado). Ver integrations/n8n/README.md
+services:
+  n8n:
+    # Tras la primera descarga, fija la versión exacta (docker image inspect → RepoDigests) y actualiza a propósito.
+    image: docker.n8n.io/n8nio/n8n:stable
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    env_file:
+      - .env
+    environment:
+      - GENERIC_TIMEZONE=America/Mexico_City
+      - TZ=America/Mexico_City
+      - N8N_HOST=localhost
+      - N8N_PROTOCOL=http
+      - N8N_SECURE_COOKIE=false
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_PERSONALIZATION_ENABLED=false
+      - N8N_PUBLIC_API_DISABLED=true
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false   # los workflows leen WW_API_BASE
+    volumes:
+      - n8n_data:/home/node/.n8n
+volumes:
+  n8n_data:

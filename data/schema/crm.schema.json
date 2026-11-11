@@ -1,0 +1,1088 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://webwizards.local/schema/crm.schema.json",
+  "title": "Web Wizards Sales CRM",
+  "description": "Esquema de los registros del CRM. Los CSV de data/crm/ y las pestañas futuras de Google Sheets siguen estas definiciones. Diccionario legible: data/crm-schema.md.",
+  "$defs": {
+    "fechaHora": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2})?([+-]\\d{2}:\\d{2}|Z)$"
+    },
+    "fecha": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "e164mx": {
+      "type": "string",
+      "pattern": "^\\+52\\d{10}$"
+    },
+    "url": {
+      "type": "string",
+      "pattern": "^https?://"
+    },
+    "vacio": {
+      "type": "string",
+      "maxLength": 0
+    },
+    "nicho": {
+      "enum": [
+        "clinica",
+        "dentista",
+        "estetica_spa",
+        "veterinaria",
+        "otro"
+      ]
+    },
+    "fuente": {
+      "enum": [
+        "google_maps",
+        "google_busqueda",
+        "sitio_web",
+        "doctoralia",
+        "seccion_amarilla",
+        "directorio_otro",
+        "instagram",
+        "facebook",
+        "meta_ad_library",
+        "referido",
+        "evento",
+        "manual",
+        "denue",
+        "osm"
+      ]
+    },
+    "canal": {
+      "enum": [
+        "email",
+        "whatsapp",
+        "telefono",
+        "formulario_web",
+        "instagram_dm",
+        "facebook_messenger",
+        "linkedin",
+        "presencial"
+      ]
+    },
+    "senal": {
+      "enum": [
+        "WEB_NONE",
+        "WEB_SOCIAL_ONLY",
+        "WEB_BROKEN",
+        "WEB_NOT_MOBILE",
+        "WEB_NO_HTTPS",
+        "WEB_OUTDATED",
+        "WEB_SLOW",
+        "WEB_NO_CTA",
+        "BOOK_NONE",
+        "BOOK_PHONE_ONLY",
+        "WA_NO_LINK",
+        "WA_NONE",
+        "FORM_BROKEN",
+        "REV_CONTACT_ISSUES",
+        "REV_UNANSWERED",
+        "GBP_INCOMPLETE",
+        "INFO_INCONSISTENT",
+        "ADS_WEAK_LANDING",
+        "GROWTH_SIGNAL"
+      ]
+    },
+    "servicio": {
+      "enum": [
+        "sitio_nuevo",
+        "rediseno_web",
+        "whatsapp_integracion",
+        "agenda_en_linea",
+        "automatizacion",
+        "seo_local"
+      ]
+    },
+    "estadoPipeline": {
+      "enum": [
+        "calificado",
+        "descartado",
+        "mensaje_borrador",
+        "pendiente_aprobacion",
+        "aprobado",
+        "contactado",
+        "en_conversacion",
+        "reunion_agendada",
+        "propuesta_enviada",
+        "ganado",
+        "perdido",
+        "pausado",
+        "no_contactar"
+      ]
+    },
+    "evidencia": {
+      "type": "object",
+      "required": [
+        "senal",
+        "observacion",
+        "url",
+        "fecha_verificacion",
+        "metodo"
+      ],
+      "properties": {
+        "senal": {
+          "$ref": "#/$defs/senal"
+        },
+        "observacion": {
+          "type": "string",
+          "minLength": 10
+        },
+        "url": {
+          "$ref": "#/$defs/url"
+        },
+        "fecha_verificacion": {
+          "$ref": "#/$defs/fecha"
+        },
+        "metodo": {
+          "type": "string",
+          "description": "Cómo se verificó: visita manual, vista móvil 375px, herramienta de rendimiento, lectura de reseñas, etc."
+        },
+        "confianza": {
+          "enum": ["alta", "media", "baja"],
+          "description": "alta: HTML crudo o navegador, comprobado; media: lectura por WebFetch u otra herramienta que resume; baja: solo fragmento de buscador o fuente secundaria. Sin campo = media. Una señal solo con evidencia baja no puede puntuar (queda pendiente de revisión)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "leadCandidate": {
+      "title": "Candidato en staging",
+      "description": "Archivo data/staging/AAAA-MM-DD/<slug>.json producido por lead-research y completado por lead-qualification. Aún sin lead_id.",
+      "type": "object",
+      "required": [
+        "fuente",
+        "fuente_url",
+        "fecha_fuente",
+        "nombre_negocio",
+        "nicho",
+        "ciudad",
+        "estado_mx",
+        "evidencias",
+        "dossier_path",
+        "investigado_por"
+      ],
+      "properties": {
+        "fuente": {
+          "$ref": "#/$defs/fuente"
+        },
+        "fuente_url": {
+          "$ref": "#/$defs/url"
+        },
+        "fecha_fuente": {
+          "$ref": "#/$defs/fecha"
+        },
+        "nombre_negocio": {
+          "type": "string",
+          "minLength": 2
+        },
+        "nicho": {
+          "$ref": "#/$defs/nicho"
+        },
+        "subnicho": {
+          "type": "string"
+        },
+        "ciudad": {
+          "type": "string"
+        },
+        "estado_mx": {
+          "type": "string"
+        },
+        "zona_horaria": {
+          "type": "string"
+        },
+        "direccion": {
+          "type": "string"
+        },
+        "google_maps_url": {
+          "$ref": "#/$defs/url"
+        },
+        "google_place_id": {
+          "type": "string"
+        },
+        "sitio_web": {
+          "$ref": "#/$defs/url"
+        },
+        "telefono_publico": {
+          "type": "string"
+        },
+        "telefono_e164": {
+          "$ref": "#/$defs/e164mx"
+        },
+        "whatsapp_publico": {
+          "$ref": "#/$defs/e164mx"
+        },
+        "email_publico": {
+          "type": "string",
+          "format": "email"
+        },
+        "instagram_url": {
+          "$ref": "#/$defs/url"
+        },
+        "facebook_url": {
+          "$ref": "#/$defs/url"
+        },
+        "otras_fuentes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/url"
+          }
+        },
+        "decisor_nombre": {
+          "type": "string"
+        },
+        "decisor_cargo": {
+          "type": "string"
+        },
+        "decisor_fuente_url": {
+          "$ref": "#/$defs/url"
+        },
+        "num_resenas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "calificacion_google": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "evidencias": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidencia"
+          }
+        },
+        "campos_no_encontrados": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "descalificadores": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dossier_path": {
+          "type": "string",
+          "pattern": "^data/research/"
+        },
+        "investigado_por": {
+          "type": "string"
+        },
+        "calificacion": {
+          "$ref": "#/$defs/calificacion"
+        }
+      },
+      "dependentRequired": {
+        "decisor_nombre": [
+          "decisor_fuente_url"
+        ]
+      },
+      "additionalProperties": false
+    },
+    "calificacion": {
+      "type": "object",
+      "required": [
+        "puntaje_icp",
+        "puntaje_oportunidad",
+        "puntaje_contacto",
+        "puntaje_capacidad",
+        "puntaje_total",
+        "clasificacion",
+        "motivo_clasificacion",
+        "senales_oportunidad",
+        "servicio_recomendado",
+        "calificado_en"
+      ],
+      "properties": {
+        "puntaje_icp": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 25
+        },
+        "puntaje_oportunidad": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 40
+        },
+        "puntaje_contacto": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "puntaje_capacidad": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "puntaje_total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "clasificacion": {
+          "enum": [
+            "A",
+            "B",
+            "C",
+            "descartado"
+          ]
+        },
+        "motivo_clasificacion": {
+          "type": "string",
+          "minLength": 10
+        },
+        "senales_oportunidad": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/senal"
+          },
+          "uniqueItems": true
+        },
+        "servicio_recomendado": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/servicio"
+          },
+          "uniqueItems": true
+        },
+        "canal_preferido": {
+          "$ref": "#/$defs/canal"
+        },
+        "calificado_en": {
+          "$ref": "#/$defs/fechaHora"
+        }
+      },
+      "additionalProperties": false
+    },
+    "lead": {
+      "title": "Registro de leads.csv",
+      "type": "object",
+      "required": [
+        "lead_id",
+        "fecha_registro",
+        "fuente",
+        "fuente_url",
+        "fecha_fuente",
+        "nombre_negocio",
+        "nombre_normalizado",
+        "nicho",
+        "ciudad",
+        "estado_mx",
+        "zona_horaria",
+        "evidencias",
+        "servicio_recomendado",
+        "puntaje_icp",
+        "puntaje_oportunidad",
+        "puntaje_contacto",
+        "puntaje_capacidad",
+        "puntaje_total",
+        "clasificacion",
+        "motivo_clasificacion",
+        "estado_pipeline",
+        "aprobacion_estado",
+        "num_seguimientos",
+        "consentimiento_whatsapp",
+        "opt_out",
+        "fecha_actualizacion"
+      ],
+      "properties": {
+        "lead_id": {
+          "type": "string",
+          "pattern": "^WW-\\d{8}-\\d{3}$"
+        },
+        "fecha_registro": {
+          "$ref": "#/$defs/fechaHora"
+        },
+        "fuente": {
+          "$ref": "#/$defs/fuente"
+        },
+        "fuente_url": {
+          "$ref": "#/$defs/url"
+        },
+        "fecha_fuente": {
+          "$ref": "#/$defs/fecha"
+        },
+        "nombre_negocio": {
+          "type": "string"
+        },
+        "nombre_normalizado": {
+          "type": "string",
+          "pattern": "^[a-z0-9 ]+$"
+        },
+        "nicho": {
+          "$ref": "#/$defs/nicho"
+        },
+        "subnicho": {
+          "type": "string"
+        },
+        "ciudad": {
+          "type": "string"
+        },
+        "estado_mx": {
+          "type": "string"
+        },
+        "zona_horaria": {
+          "type": "string",
+          "pattern": "^America/"
+        },
+        "direccion": {
+          "type": "string"
+        },
+        "google_maps_url": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/url"
+            },
+            {
+              "$ref": "#/$defs/vacio"
+            }
+          ]
+        },
+        "google_place_id": {
+          "type": "string"
+        },
+        "sitio_web": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/url"
+            },
+            {
+              "$ref": "#/$defs/vacio"
+            }
+          ]
+        },
+        "dominio": {
+          "type": "string",
+          "pattern": "^([a-z0-9-]+\\.)+[a-z]{2,}$|^$"
+        },
+        "telefono_publico": {
+          "type": "string"
+        },
+        "telefono_e164": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/e164mx"
+            },
+            {
+              "$ref": "#/$defs/vacio"
+            }
+          ]
+        },
+        "whatsapp_publico": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/e164mx"
+            },
+            {
+              "$ref": "#/$defs/vacio"
+            }
+          ]
+        },
+        "email_publico": {
+          "type": "string"
+        },
+        "instagram_url": {
+          "type": "string"
+        },
+        "facebook_url": {
+          "type": "string"
+        },
+        "otras_fuentes": {
+          "type": "string",
+          "description": "URLs separadas por ';'"
+        },
+        "decisor_nombre": {
+          "type": "string"
+        },
+        "decisor_cargo": {
+          "type": "string"
+        },
+        "decisor_fuente_url": {
+          "type": "string"
+        },
+        "num_resenas": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "calificacion_google": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "senales_oportunidad": {
+          "type": "string",
+          "description": "Códigos de señal separados por ';'"
+        },
+        "evidencias": {
+          "type": "string",
+          "pattern": "^data/research/WW-\\d{8}-\\d{3}\\.md$"
+        },
+        "servicio_recomendado": {
+          "type": "string",
+          "description": "Servicios separados por ';'"
+        },
+        "puntaje_icp": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 25
+        },
+        "puntaje_oportunidad": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 40
+        },
+        "puntaje_contacto": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "puntaje_capacidad": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "puntaje_total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "clasificacion": {
+          "enum": [
+            "A",
+            "B",
+            "C",
+            "descartado"
+          ]
+        },
+        "motivo_clasificacion": {
+          "type": "string"
+        },
+        "estado_pipeline": {
+          "$ref": "#/$defs/estadoPipeline"
+        },
+        "canal_preferido": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/canal"
+            },
+            {
+              "$ref": "#/$defs/vacio"
+            }
+          ]
+        },
+        "mensaje_inicial_id": {
+          "type": "string"
+        },
+        "aprobacion_estado": {
+          "enum": [
+            "no_aplica",
+            "pendiente",
+            "aprobado",
+            "rechazado",
+            "cambios_solicitados"
+          ]
+        },
+        "aprobado_por": {
+          "type": "string"
+        },
+        "fecha_aprobacion": {
+          "type": "string"
+        },
+        "fecha_primer_contacto": {
+          "type": "string"
+        },
+        "fecha_ultima_interaccion": {
+          "type": "string"
+        },
+        "proximo_seguimiento": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fecha"
+            },
+            {
+              "$ref": "#/$defs/vacio"
+            }
+          ]
+        },
+        "num_seguimientos": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "consentimiento_whatsapp": {
+          "enum": [
+            "no",
+            "si_inicio_lead",
+            "si_explicito"
+          ]
+        },
+        "fecha_consentimiento": {
+          "type": "string"
+        },
+        "opt_out": {
+          "type": "boolean"
+        },
+        "fecha_opt_out": {
+          "type": "string"
+        },
+        "responsable": {
+          "type": "string"
+        },
+        "notas": {
+          "type": "string"
+        },
+        "fecha_actualizacion": {
+          "$ref": "#/$defs/fechaHora"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "aprobacion_estado": {
+                "const": "aprobado"
+              }
+            },
+            "required": [
+              "aprobacion_estado"
+            ]
+          },
+          "then": {
+            "required": [
+              "aprobado_por",
+              "fecha_aprobacion"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "opt_out": {
+                "const": true
+              }
+            },
+            "required": [
+              "opt_out"
+            ]
+          },
+          "then": {
+            "required": [
+              "fecha_opt_out"
+            ],
+            "properties": {
+              "estado_pipeline": {
+                "const": "no_contactar"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "estado_pipeline": {
+                "enum": [
+                  "contactado",
+                  "en_conversacion",
+                  "reunion_agendada",
+                  "propuesta_enviada",
+                  "pausado"
+                ]
+              }
+            },
+            "required": [
+              "estado_pipeline"
+            ]
+          },
+          "then": {
+            "required": [
+              "proximo_seguimiento"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "decisor_nombre"
+            ]
+          },
+          "then": {
+            "required": [
+              "decisor_fuente_url"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "interaccion": {
+      "type": "object",
+      "required": [
+        "interaccion_id",
+        "lead_id",
+        "fecha_hora",
+        "canal",
+        "direccion",
+        "tipo",
+        "resumen",
+        "enviado_por",
+        "registrado_por"
+      ],
+      "properties": {
+        "interaccion_id": {
+          "type": "string",
+          "pattern": "^INT-\\d{8}-\\d{4}$"
+        },
+        "lead_id": {
+          "type": "string",
+          "pattern": "^WW-\\d{8}-\\d{3}$"
+        },
+        "fecha_hora": {
+          "$ref": "#/$defs/fechaHora"
+        },
+        "canal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/canal"
+            },
+            {
+              "const": "interno"
+            }
+          ]
+        },
+        "direccion": {
+          "enum": [
+            "saliente",
+            "entrante",
+            "interna"
+          ]
+        },
+        "tipo": {
+          "enum": [
+            "mensaje_inicial",
+            "seguimiento",
+            "respuesta_lead",
+            "respuesta_ww",
+            "llamada",
+            "reunion",
+            "nota",
+            "opt_out",
+            "rebote",
+            "aprobacion",
+            "cambio_estado"
+          ]
+        },
+        "resumen": {
+          "type": "string"
+        },
+        "contenido_ref": {
+          "type": "string"
+        },
+        "plantilla_id": {
+          "type": "string"
+        },
+        "enviado_por": {
+          "enum": [
+            "humano",
+            "n8n",
+            "agente",
+            "lead"
+          ]
+        },
+        "aprobacion_ref": {
+          "type": "string"
+        },
+        "resultado": {
+          "enum": [
+            "enviado",
+            "entregado",
+            "leido",
+            "respondido",
+            "sin_respuesta",
+            "rebotado",
+            "fallido",
+            "n/a"
+          ]
+        },
+        "sentimiento": {
+          "enum": [
+            "positivo",
+            "neutral",
+            "negativo",
+            "opt_out",
+            "n/a"
+          ]
+        },
+        "siguiente_accion": {
+          "type": "string"
+        },
+        "fecha_siguiente_accion": {
+          "type": "string"
+        },
+        "registrado_por": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "direccion": {
+                "const": "saliente"
+              },
+              "tipo": {
+                "const": "mensaje_inicial"
+              }
+            },
+            "required": [
+              "direccion",
+              "tipo"
+            ]
+          },
+          "then": {
+            "required": [
+              "aprobacion_ref"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "seguimiento": {
+      "type": "object",
+      "required": [
+        "seguimiento_id",
+        "lead_id",
+        "fecha_programada",
+        "numero_seguimiento",
+        "canal",
+        "estado",
+        "requiere_aprobacion",
+        "creado_en"
+      ],
+      "properties": {
+        "seguimiento_id": {
+          "type": "string",
+          "pattern": "^FU-\\d{8}-\\d{4}$"
+        },
+        "lead_id": {
+          "type": "string",
+          "pattern": "^WW-\\d{8}-\\d{3}$"
+        },
+        "fecha_programada": {
+          "$ref": "#/$defs/fecha"
+        },
+        "ventana_horaria": {
+          "type": "string",
+          "pattern": "^\\d{2}:\\d{2}-\\d{2}:\\d{2}$"
+        },
+        "numero_seguimiento": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "canal": {
+          "$ref": "#/$defs/canal"
+        },
+        "plantilla_id": {
+          "type": "string"
+        },
+        "borrador_ref": {
+          "type": "string"
+        },
+        "estado": {
+          "enum": [
+            "programado",
+            "borrador_listo",
+            "pendiente_aprobacion",
+            "aprobado",
+            "enviado",
+            "cancelado",
+            "vencido"
+          ]
+        },
+        "requiere_aprobacion": {
+          "type": "boolean"
+        },
+        "regla_aplicada": {
+          "type": "string"
+        },
+        "creado_en": {
+          "$ref": "#/$defs/fechaHora"
+        },
+        "completado_en": {
+          "type": "string"
+        },
+        "notas": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "supresion": {
+      "type": "object",
+      "required": [
+        "valor",
+        "tipo",
+        "motivo",
+        "fecha",
+        "fuente"
+      ],
+      "properties": {
+        "valor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tipo": {
+          "enum": [
+            "telefono_e164",
+            "email",
+            "dominio",
+            "google_place_id",
+            "nombre_ciudad"
+          ]
+        },
+        "lead_id": {
+          "type": "string"
+        },
+        "motivo": {
+          "enum": [
+            "opt_out",
+            "cliente_actual",
+            "competidor",
+            "socio",
+            "solicitud_legal",
+            "rebote_permanente",
+            "repep"
+          ]
+        },
+        "fecha": {
+          "$ref": "#/$defs/fechaHora"
+        },
+        "fuente": {
+          "type": "string"
+        },
+        "notas": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "x-dias-inhabiles-extra": [],
+  "x-dias-inhabiles-nota": "Días en que no se contacta además de domingos y del art. 74 LFT (que calcula crm_tool.py). Añadir aquí jornadas electorales federales o locales: {\"fecha\": \"AAAA-MM-DD\", \"motivo\": \"...\"}. Cambiarlo requiere aprobación de una persona.",
+  "x-estados-finales": [
+    "descartado",
+    "ganado",
+    "perdido",
+    "no_contactar"
+  ],
+  "x-estados-con-seguimiento": [
+    "contactado",
+    "en_conversacion",
+    "reunion_agendada",
+    "propuesta_enviada",
+    "pausado"
+  ],
+  "x-transiciones": {
+    "calificado": [
+      "mensaje_borrador",
+      "descartado"
+    ],
+    "mensaje_borrador": [
+      "pendiente_aprobacion",
+      "descartado"
+    ],
+    "pendiente_aprobacion": [
+      "aprobado",
+      "mensaje_borrador",
+      "descartado"
+    ],
+    "aprobado": [
+      "contactado",
+      "mensaje_borrador"
+    ],
+    "contactado": [
+      "en_conversacion",
+      "pausado",
+      "perdido"
+    ],
+    "en_conversacion": [
+      "reunion_agendada",
+      "pausado",
+      "perdido"
+    ],
+    "reunion_agendada": [
+      "propuesta_enviada",
+      "en_conversacion",
+      "perdido"
+    ],
+    "propuesta_enviada": [
+      "ganado",
+      "perdido",
+      "en_conversacion"
+    ],
+    "pausado": [
+      "mensaje_borrador",
+      "en_conversacion",
+      "perdido"
+    ],
+    "descartado": [],
+    "ganado": [],
+    "perdido": [],
+    "no_contactar": []
+  },
+  "x-transiciones-nota": "Fuente única de transiciones. Cualquier estado no final puede pasar a no_contactar únicamente mediante 'crm_tool.py suppress'. Ningún estado final tiene salidas. Estado inicial al registrar: calificado (A/B/C) o descartado.",
+  "x-senales-puntos": {
+    "WEB_NONE": 15,
+    "WEB_SOCIAL_ONLY": 5,
+    "WEB_BROKEN": 12,
+    "WEB_NOT_MOBILE": 10,
+    "WEB_NO_HTTPS": 5,
+    "WEB_OUTDATED": 5,
+    "WEB_SLOW": 4,
+    "WEB_NO_CTA": 5,
+    "BOOK_NONE": 8,
+    "BOOK_PHONE_ONLY": 6,
+    "WA_NO_LINK": 4,
+    "WA_NONE": 4,
+    "FORM_BROKEN": 5,
+    "REV_CONTACT_ISSUES": 7,
+    "REV_UNANSWERED": 3,
+    "GBP_INCOMPLETE": 4,
+    "INFO_INCONSISTENT": 3,
+    "ADS_WEAK_LANDING": 6,
+    "GROWTH_SIGNAL": 5
+  },
+  "x-oportunidad-reglas": {
+    "tope": 40,
+    "WEB_NONE_excluye": [
+      "WEB_BROKEN",
+      "WEB_NOT_MOBILE",
+      "WEB_NO_HTTPS",
+      "WEB_OUTDATED",
+      "WEB_SLOW",
+      "WEB_NO_CTA"
+    ]
+  },
+  "x-clasificacion": {
+    "descartado_si_total_menor_a": 30,
+    "A": {
+      "total_min": 70,
+      "senales_min": 2,
+      "contacto_min": 10
+    },
+    "B": {
+      "total_min": 50,
+      "senales_min": 1,
+      "contacto_min": 10
+    },
+    "resto": "C"
+  }
+}

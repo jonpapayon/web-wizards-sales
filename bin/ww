@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Web Wizards Sales OS — comandos de operación local.  Uso: bin/ww <comando>
+# Ningún comando envía mensajes ni publica nada. El despliegue a Cloudflare es manual (docs/DESPLIEGUE.md).
+set -euo pipefail
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+# Lee .dev.vars (secretos locales, no versionado) para el investigador
+load_vars() {
+  if [[ -f .dev.vars ]]; then
+    while IFS='=' read -r k v; do
+      [[ "$k" =~ ^[A-Z0-9_]+$ ]] || continue
+      v="${v%\'}"; v="${v#\'}"; v="${v%\"}"; v="${v#\"}"
+      export "$k=$v"
+    done < .dev.vars
+  fi
+}
+
+case "${1:-ayuda}" in
+  dev)            # Dashboard + API (Worker real, D1 local emulado) → http://127.0.0.1:8787
+    python3 scripts/build_worker_content.py >/dev/null
+    [[ -f data/d1/local.sqlite ]] || { echo "Creando data/d1/local.sqlite desde los CSV…"; python3 scripts/d1_migrate.py apply-local; }
+    exec node dev/worker_local.mjs "${@:2}" ;;
+  dashboard)      # Dashboard clásico sobre CSV (sin login, solo este Mac) → http://127.0.0.1:8765
+    exec python3 app/server.py "${@:2}" ;;
+  investigator)   # Investigador del Mac (bucle; requiere el Mac encendido)
+    load_vars
+    export WW_RESEARCH_NETWORK=1
+    exec python3 -m research.investigator --api "${WW_API_BASE:-http://127.0.0.1:8787}" "${@:2}" ;;
+  sync)           # Procesa los trabajos pendientes una vez y termina
+    load_vars
+    export WW_RESEARCH_NETWORK=1
+    exec python3 -m research.investigator --api "${WW_API_BASE:-http://127.0.0.1:8787}" --once "${@:2}" ;;
+  n8n)            # n8n Community local (Docker si existe; si no, instrucciones)
+    if command -v docker >/dev/null 2>&1; then
+      [[ -f integrations/n8n/.env ]] || { echo "Crea integrations/n8n/.env (ver integrations/n8n/README.md)"; exit 1; }
+      cd integrations/n8n && exec docker compose up -d
+    else
+      echo "Docker no está instalado. Alternativa: WW_API_BASE=http://127.0.0.1:8787 npx n8n  (descarga n8n; decisión tuya)"; exit 1
+    fi ;;
+  test)           # Todas las pruebas (Python + Node)
+    python3 scripts/build_worker_content.py >/dev/null
+    python3 tests/run_all.py "${@:2}"
+    node --test --test-reporter=spec tests/worker/ ;;
+  migrate)        # Regenera el seed desde los CSV y reconcilia la base local
+    python3 scripts/d1_migrate.py build-seed >/dev/null
+    [[ -f data/d1/local.sqlite ]] || python3 scripts/d1_migrate.py apply-local
+    python3 scripts/d1_migrate.py reconcile --db data/d1/local.sqlite ;;
+  check)          # Verifica conexiones y requisitos (sin llamar a servicios externos)
+    load_vars
+    python3 - <<'PY'
+import os, shutil, socket, sqlite3, importlib.util, json
+def port(p):
+    try: socket.create_connection(("127.0.0.1", p), timeout=0.5).close(); return True
+    except OSError: return False
+ok = lambda b: "✔" if b else "✘"
+db = "data/d1/local.sqlite"
+n = sqlite3.connect(db).execute("SELECT COUNT(*) FROM leads").fetchone()[0] if os.path.exists(db) else None
+rows = [
+  ("Python 3.11+", True, ""), ("Node (node:sqlite)", bool(shutil.which("node")), ""),
+  ("Base D1 local", n is not None, f"{n} leads" if n is not None else "bin/ww migrate"),
+  ("Usuarios (AUTH_USERS)", bool(os.environ.get("AUTH_USERS")), "python3 scripts/ww_auth.py add-user"),
+  ("WORKER_TOKEN", bool(os.environ.get("WORKER_TOKEN")), "python3 scripts/ww_auth.py token"),
+  ("N8N_TOKEN", bool(os.environ.get("N8N_TOKEN")), "opcional"),
+  ("DENUE_TOKEN", bool(os.environ.get("DENUE_TOKEN")), "registro en INEGI"),
+  ("Playwright", importlib.util.find_spec("playwright") is not None, "pip install playwright && python -m playwright install chromium"),
+  ("Docker (n8n)", bool(shutil.which("docker")), "opcional: npx n8n"),
+  ("API local :8787", port(8787), "bin/ww dev"), ("Dashboard CSV :8765", port(8765), "opcional"), ("n8n :5678", port(5678), "bin/ww n8n"),
+]
+for name, good, hint in rows: print(f" {ok(good)} {name:24s} {'' if good else hint}")
+PY
+    ;;
+  user)  exec python3 scripts/ww_auth.py add-user "${@:2}" ;;
+  token) exec python3 scripts/ww_auth.py token ;;
+  *)
+    cat <<'TXT'
+Uso: bin/ww <comando>
+  dev           Dashboard + API con login y D1 local   → http://127.0.0.1:8787
+  dashboard     Dashboard clásico sobre CSV            → http://127.0.0.1:8765
+  investigator  Investigador del Mac (bucle continuo; el Mac debe estar encendido)
+  sync          Procesa los trabajos pendientes y termina
+  n8n           Inicia n8n local (Docker)
+  test          Ejecuta todas las pruebas
+  migrate       CSV → seed → base local + reconciliación
+  check         Verifica requisitos y conexiones
+  user <u> "Nombre"   Crea o actualiza un usuario (pide contraseña)
+  token         Genera un token aleatorio
+Despliegue: docs/DESPLIEGUE.md (manual, con tu autorización).
+TXT
+    ;;
+esac

@@ -1,0 +1,12 @@
+{
+  "name": "ww-sales-worker",
+  "private": true,
+  "type": "module",
+  "description": "Web Wizards Sales OS — Worker de Cloudflare. Sin dependencias en tiempo de ejecución; wrangler se usa con npx al desplegar.",
+  "scripts": {
+    "build": "python3 ../scripts/build_worker_content.py",
+    "dev:local": "node ../dev/worker_local.mjs",
+    "test": "node --test ../tests/worker/",
+    "deploy": "bash ./deploy.sh"
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "name": "WW · 02 · Investigación pendiente → aviso interno",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */2 * * 1-6"
+            }
+          ]
+        }
+      },
+      "name": "Cada 2 h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ ($env.WW_API_BASE || 'http://host.docker.internal:8787') }}/api/jobs/pending",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Trabajos pendientes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "WW Sales API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const t = $json.trabajos || []; const viejos = t.filter(j => j.estado === 'pendiente' && (Date.now() - new Date(j.creado_en.replace(/-06:00$/, '-06:00')).getTime()) > 2*3600e3);\nreturn viejos.length ? [{ json: { n: viejos.length } }] : [];"
+      },
+      "name": "¿Atascados?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.WW_API_BASE || 'http://host.docker.internal:8787') }}/api/integrations/n8n/tasks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tipo: 'investigacion', lead_id: $json.lead_id || '', titulo: 'Hay ' + $json.n + ' trabajos de investigación esperando al investigador del Mac', detalle: 'Enciende el Mac y ejecuta: bin/ww investigator' }) }}",
+        "options": {}
+      },
+      "name": "Crear tarea",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        600,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "WW Sales API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada 2 h": {
+      "main": [
+        [
+          {
+            "node": "Trabajos pendientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trabajos pendientes": {
+      "main": [
+        [
+          {
+            "node": "¿Atascados?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Atascados?": {
+      "main": [
+        [
+          {
+            "node": "Crear tarea",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/Mexico_City",
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {
+    "nota": "Avisa si hay trabajos de investigación sin procesar hace más de 2 horas (el Mac está apagado o el investigador detenido)."
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch",
+      "Edit(/data/research/**)",
+      "Edit(/data/staging/**)",
+      "Edit(/data/outreach/**)",
+      "Edit(/data/reports/**)",
+      "Bash(python3 scripts/crm_tool.py *)",
+      "Bash(python3 scripts/tests/test_guard.py)",
+      "Bash(python3 tests/run_all.py*)",
+      "Bash(python3 app/seed_demo.py)",
+      "Bash(python3 app/server.py*)"
+    ],
+    "ask": [
+      "Edit(/app/server.py)",
+      "Edit(/research/fetch.py)",
+      "Edit(/research/investigator.py)",
+      "Edit(/cloudflare/src/**)",
+      "Edit(/cloudflare/migrations/**)",
+      "Edit(/cloudflare/wrangler.toml)",
+      "Edit(/.claude/**)",
+      "Edit(/scripts/**)",
+      "Edit(/policies/**)",
+      "Edit(/data/schema/**)",
+      "Edit(/workflows/approval-rules.md)",
+      "Edit(/workflows/guardrails.md)",
+      "Edit(/CLAUDE.md)"
+    ],
+    "deny": [
+      "Edit(/data/crm/**)",
+      "Edit(/data/d1/**)",
+      "Edit(/cloudflare/seed/**)",
+      "Edit(/.dev.vars)",
+      "Read(/.dev.vars)",
+      "Bash(npx wrangler *)",
+      "Bash(wrangler *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(osascript *)",
+      "Bash(sendmail *)",
+      "Bash(mail *)",
+      "Bash(open *)",
+      "Bash(gh *)",
+      "Bash(git push *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(chflags *)",
+      "Bash(pip install *)",
+      "Bash(pip3 install *)",
+      "Bash(npm install *)",
+      "Bash(brew install *)",
+      "mcp__claude_ai_Gmail",
+      "mcp__claude_ai_Google_Calendar",
+      "mcp__claude_ai_Cloudflare_Developer_Platform",
+      "mcp__plugin_vercel_vercel",
+      "mcp__plugin_figma_figma",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_fill_form",
+      "mcp__playwright__browser_select_option",
+      "mcp__playwright__browser_press_key",
+      "mcp__playwright__browser_file_upload",
+      "mcp__playwright__browser_drag",
+      "mcp__playwright__browser_drop",
+      "mcp__playwright__browser_handle_dialog",
+      "mcp__playwright__browser_evaluate",
+      "mcp__playwright__browser_run_code_unsafe",
+      "mcp__playwright__browser_hover"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__playwright__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["${CLAUDE_PROJECT_DIR}/scripts/hooks/guard.py"],
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ]
+  }
+}

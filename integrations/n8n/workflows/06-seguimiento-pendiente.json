@@ -1,0 +1,125 @@
+{
+  "name": "WW · 06 · Seguimientos de hoy y vencidos (9:00)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-6"
+            }
+          ]
+        }
+      },
+      "name": "Días hábiles 9:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ ($env.WW_API_BASE || 'http://host.docker.internal:8787') }}/api/followups",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Seguimientos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "WW Sales API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });\nreturn ($json.proximas || []).filter(a => a.vencido || a.fecha === hoy).map(a => ({ json: a }));"
+      },
+      "name": "Hoy y vencidos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.WW_API_BASE || 'http://host.docker.internal:8787') }}/api/integrations/n8n/tasks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tipo: 'seguimiento', lead_id: $json.lead_id || '', titulo: ($json.vencido ? 'VENCIDO: ' : 'Hoy: ') + $json.negocio + ' — ' + $json.accion, detalle: 'Lo realiza una persona. El sistema no envía mensajes.' }) }}",
+        "options": {}
+      },
+      "name": "Crear tarea",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        600,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "WW Sales API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Días hábiles 9:00": {
+      "main": [
+        [
+          {
+            "node": "Seguimientos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seguimientos": {
+      "main": [
+        [
+          {
+            "node": "Hoy y vencidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hoy y vencidos": {
+      "main": [
+        [
+          {
+            "node": "Crear tarea",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/Mexico_City",
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {
+    "nota": "Tareas de seguimiento para hoy y vencidos. Las tareas duplicadas abiertas se ignoran en la API."
+  }
+}

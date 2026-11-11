@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Web Wizards Sales OS</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="banner"></div>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><div class="logo">✦</div><div>Web Wizards<small>Sales OS</small></div></div>
+      <nav class="nav" id="nav">
+        <a href="#/dashboard" data-route="dashboard"><span class="ico">◧</span>Dashboard</a>
+        <a href="#/prospectos" data-route="prospectos"><span class="ico">☰</span>Prospectos<span class="count" id="c-leads"></span></a>
+        <a href="#/pipeline" data-route="pipeline"><span class="ico">▥</span>Pipeline</a>
+        <a href="#/prospeccion" data-route="prospeccion" id="nav-prospeccion" hidden><span class="ico">✦</span>Prospección</a>
+        <a href="#/investigacion" data-route="investigacion"><span class="ico">⌕</span>Investigación<span class="count" id="c-review"></span></a>
+        <a href="#/mensajes" data-route="mensajes"><span class="ico">✉</span>Mensajes<span class="count" id="c-drafts"></span></a>
+        <a href="#/seguimientos" data-route="seguimientos"><span class="ico">↻</span>Seguimientos</a>
+        <a href="#/reportes" data-route="reportes"><span class="ico">▤</span>Reportes</a>
+        <a href="#/configuracion" data-route="configuracion"><span class="ico">⚙</span>Configuración</a>
+      </nav>
+      <div class="foot"><span class="safe">● Envíos bloqueados</span><br>Este sistema no envía mensajes ni llena formularios. Aprobar = listo para que una persona lo use.</div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <button class="btn ghost menu-btn" id="menu-btn" aria-label="Abrir menú">☰</button>
+        <strong id="page-title">Dashboard</strong>
+        <div class="spacer"></div>
+        <span class="badge neutral" id="env-badge">…</span>
+        <button class="btn sm" id="who-btn" title="Tu nombre se usa para registrar aprobaciones y acciones">Tú: <span id="who-name">sin nombre</span></button>
+        <button class="btn sm ghost" id="logout-btn" hidden>Salir</button>
+      </header>
+      <main class="content" id="view" aria-live="polite"></main>
+    </div>
+  </div>
+  <div class="toasts" id="toasts"></div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

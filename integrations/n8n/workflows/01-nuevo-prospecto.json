@@ -1,0 +1,161 @@
+{
+  "name": "WW · 01 · Nuevo prospecto → tarea de revisión",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 9-18 * * 1-6"
+            }
+          ]
+        }
+      },
+      "name": "Cada 15 min (horario laboral)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $getWorkflowStaticData('global'); return [{ json: { since: s.cursor || '' } }];"
+      },
+      "name": "Cursor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ ($env.WW_API_BASE || 'http://host.docker.internal:8787') }}/api/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "since",
+              "value": "={{ $json.since }}"
+            },
+            {
+              "name": "limit",
+              "value": "500"
+            }
+          ]
+        }
+      },
+      "name": "Eventos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "WW Sales API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ev = $json.eventos || []; const s = $getWorkflowStaticData('global'); if (ev.length) s.cursor = ev[ev.length-1].ts;\nconst want = new Set(['prospecto.nuevo']);\nreturn ev.filter(e => want.has(e.evento)).map(e => ({ json: e }));.filter(i => i.json.detalle.estado === 'revision')"
+      },
+      "name": "Prospectos nuevos en revisión",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.WW_API_BASE || 'http://host.docker.internal:8787') }}/api/integrations/n8n/tasks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tipo: 'revisar_candidato', lead_id: $json.lead_id || '', titulo: 'Revisar candidato: ' + $json.detalle.nombre, detalle: 'Clase propuesta ' + $json.detalle.clase_propuesta + ' (' + $json.detalle.puntaje + ' pts). Candidato ' + $json.entidad }) }}",
+        "options": {}
+      },
+      "name": "Crear tarea",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "WW Sales API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada 15 min (horario laboral)": {
+      "main": [
+        [
+          {
+            "node": "Cursor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cursor": {
+      "main": [
+        [
+          {
+            "node": "Eventos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eventos": {
+      "main": [
+        [
+          {
+            "node": "Prospectos nuevos en revisión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prospectos nuevos en revisión": {
+      "main": [
+        [
+          {
+            "node": "Crear tarea",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/Mexico_City",
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {
+    "nota": "Crea una tarea interna por cada prospecto que el motor deja en revisión."
+  }
+}

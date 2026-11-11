@@ -1,0 +1,161 @@
+{
+  "name": "WW · 04 · Borrador listo → aprobación humana",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/30 9-18 * * 1-6"
+            }
+          ]
+        }
+      },
+      "name": "Cada 30 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $getWorkflowStaticData('global'); return [{ json: { since: s.cursor || '' } }];"
+      },
+      "name": "Cursor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ ($env.WW_API_BASE || 'http://host.docker.internal:8787') }}/api/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "since",
+              "value": "={{ $json.since }}"
+            },
+            {
+              "name": "limit",
+              "value": "500"
+            }
+          ]
+        }
+      },
+      "name": "Eventos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "WW Sales API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ev = $json.eventos || []; const s = $getWorkflowStaticData('global'); if (ev.length) s.cursor = ev[ev.length-1].ts;\nconst want = new Set(['borrador.listo']);\nreturn ev.filter(e => want.has(e.evento)).map(e => ({ json: e }));.map(i => ({ json: { ...i.json, lead_id: i.json.entidad } }))"
+      },
+      "name": "Borradores listos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.WW_API_BASE || 'http://host.docker.internal:8787') }}/api/integrations/n8n/tasks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tipo: 'aprobar_borrador', lead_id: $json.lead_id || '', titulo: 'Aprobar o pedir cambios: ' + $json.entidad, detalle: 'Dashboard › Mensajes. Aprobar NO envía: autoriza el uso manual del borrador.' }) }}",
+        "options": {}
+      },
+      "name": "Crear tarea",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "WW Sales API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada 30 min": {
+      "main": [
+        [
+          {
+            "node": "Cursor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cursor": {
+      "main": [
+        [
+          {
+            "node": "Eventos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eventos": {
+      "main": [
+        [
+          {
+            "node": "Borradores listos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Borradores listos": {
+      "main": [
+        [
+          {
+            "node": "Crear tarea",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/Mexico_City",
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {
+    "nota": "Tarea de aprobación humana por cada borrador que pasa a pendiente de aprobación."
+  }
+}

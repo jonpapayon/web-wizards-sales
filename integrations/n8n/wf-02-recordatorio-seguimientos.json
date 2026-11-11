@@ -1,0 +1,47 @@
+{
+  "name": "WW Sales OS · 02 · Seguimientos del día (recordatorio interno)",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [ { "field": "cronExpression", "expression": "0 9 * * 1-6" } ] } },
+      "name": "Días hábiles 9:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ ($env.WW_API_BASE || 'http://127.0.0.1:8765') + '/api/followups' }}",
+        "options": {}
+      },
+      "name": "GET /api/followups",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "notes": "Lectura. El servidor solo acepta Host 127.0.0.1/localhost."
+    },
+    {
+      "parameters": {
+        "jsCode": "const hoy = new Date().toISOString().slice(0, 10);\nconst p = $json.proximas || [];\nreturn [{ json: {\n  vencidos: p.filter(a => a.vencido).map(a => `${a.negocio} (${a.fecha}): ${a.accion}`),\n  hoy: p.filter(a => a.fecha === hoy).map(a => `${a.negocio}: ${a.accion}`)\n} }];"
+      },
+      "name": "Filtrar vencidos y de hoy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {},
+      "name": "Destino interno (pendiente de autorización)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [660, 0],
+      "notes": "Solo un canal interno del equipo. Los seguimientos a prospectos los envía una persona."
+    }
+  ],
+  "connections": {
+    "Días hábiles 9:00": { "main": [ [ { "node": "GET /api/followups", "type": "main", "index": 0 } ] ] },
+    "GET /api/followups": { "main": [ [ { "node": "Filtrar vencidos y de hoy", "type": "main", "index": 0 } ] ] },
+    "Filtrar vencidos y de hoy": { "main": [ [ { "node": "Destino interno (pendiente de autorización)", "type": "main", "index": 0 } ] ] }
+  },
+  "settings": { "timezone": "America/Mexico_City" },
+  "active": false
+}

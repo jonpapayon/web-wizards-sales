@@ -1,0 +1,73 @@
+{
+  "fuente": "google_maps",
+  "fuente_url": "https://www.google.com/maps/place/EJEMPLO-FICTICIO",
+  "fecha_fuente": "2026-11-11",
+  "nombre_negocio": "Clínica Dental Ejemplo (FICTICIO)",
+  "nicho": "dentista",
+  "subnicho": "ortodoncia",
+  "ciudad": "Puebla",
+  "estado_mx": "Puebla",
+  "zona_horaria": "America/Mexico_City",
+  "direccion": "Dirección comercial tal como se publica",
+  "google_maps_url": "https://www.google.com/maps/place/EJEMPLO-FICTICIO",
+  "facebook_url": "https://www.facebook.com/ejemplo-ficticio",
+  "telefono_publico": "222 000 0000",
+  "telefono_e164": "+522220000000",
+  "otras_fuentes": [
+    "https://www.facebook.com/ejemplo-ficticio"
+  ],
+  "num_resenas": 87,
+  "calificacion_google": 4.6,
+  "evidencias": [
+    {
+      "senal": "WEB_NONE",
+      "observacion": "No se encontró dominio propio: la ficha de Google, el perfil de Facebook y la búsqueda del nombre no muestran sitio web del negocio.",
+      "url": "https://www.google.com/maps/place/EJEMPLO-FICTICIO",
+      "fecha_verificacion": "2026-11-11",
+      "metodo": "Revisión de ficha de Google, perfil de Facebook y búsqueda del nombre exacto"
+    },
+    {
+      "senal": "WEB_SOCIAL_ONLY",
+      "observacion": "El campo 'Sitio web' de la ficha de Google enlaza a la página de Facebook del negocio; no existe dominio propio.",
+      "url": "https://www.google.com/maps/place/EJEMPLO-FICTICIO",
+      "fecha_verificacion": "2026-11-11",
+      "metodo": "Revisión manual de la ficha pública de Google Maps"
+    },
+    {
+      "senal": "BOOK_PHONE_ONLY",
+      "observacion": "La publicación fijada de Facebook indica 'Citas únicamente por teléfono'.",
+      "url": "https://www.facebook.com/ejemplo-ficticio",
+      "fecha_verificacion": "2026-11-11",
+      "metodo": "Lectura de la publicación fijada en el perfil público"
+    }
+  ],
+  "campos_no_encontrados": [
+    "email_publico",
+    "whatsapp_publico",
+    "decisor_nombre",
+    "sitio_web"
+  ],
+  "descalificadores": [],
+  "dossier_path": "data/research/clinica-dental-ejemplo-ficticio-puebla.md",
+  "investigado_por": "lead-researcher",
+  "calificacion": {
+    "puntaje_icp": 25,
+    "puntaje_oportunidad": 26,
+    "puntaje_contacto": 15,
+    "puntaje_capacidad": 10,
+    "puntaje_total": 76,
+    "clasificacion": "A",
+    "motivo_clasificacion": "Sin sitio propio (la ficha enlaza a Facebook) y citas solo por teléfono. 87 reseñas, ofrece ortodoncia. Teléfono y Messenger del negocio verificados.",
+    "senales_oportunidad": [
+      "WEB_NONE",
+      "WEB_SOCIAL_ONLY",
+      "BOOK_PHONE_ONLY"
+    ],
+    "servicio_recomendado": [
+      "sitio_nuevo",
+      "agenda_en_linea"
+    ],
+    "canal_preferido": "facebook_messenger",
+    "calificado_en": "2026-11-11T12:30:00-06:00"
+  }
+}

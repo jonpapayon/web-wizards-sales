@@ -1,0 +1,51 @@
+# Web Wizards Sales OS — configuración de Cloudflare (Workers + Static Assets + D1). Plan gratuito.
+# NO desplegar sin autorización. Pasos: docs/DESPLIEGUE.md
+name = "ww-sales"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true           # TEMPORAL (autorizado 2026-11-11) para probar en *.workers.dev; volver a false al conectar sales.webwizards.click
+preview_urls = false
+
+# Dashboard servido por el mismo Worker (sucesor recomendado de Pages). run_worker_first = true:
+# toda petición pasa por el Worker, que aplica cabeceras de seguridad, Host y autenticación antes de servir archivos.
+[assets]
+directory = "../app/static"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ww-sales"
+database_id = "5d9a0e11-a098-48ec-ad8c-0bf8a5f3608b"   # creada 2026-11-11, región WNAM
+migrations_dir = "migrations"
+
+# Límite de frecuencia nativo (complementa el de D1). namespace_id: entero único en tu cuenta.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "4815"
+  [ratelimits.simple]
+  limit = 120
+  period = 60
+
+# Mantenimiento diario 07:00 hora de México (13:00 UTC): sesiones vencidas, caché, trabajos atascados, reporte diario.
+[triggers]
+crons = ["0 13 * * *"]
+
+[vars]
+ALLOWED_HOSTS = "sales.webwizards.click,ww-sales.whyjonpapayon.workers.dev"   # quitar el host workers.dev al conectar el dominio
+WW_ENTORNO = "real"
+COOKIE_SECURE = "true"
+
+[observability]
+enabled = true
+
+# Dominio: autorizado 2026-11-11. Crea el registro DNS y el certificado de sales.webwizards.click al desplegar.
+# NO desplegar hasta que la zona webwizards.click esté "Active" en Cloudflare (nameservers asa/kobe.ns.cloudflare.com).
+# Única ruta permitida; cualquier otro dominio requiere nueva autorización (lo exige tests/worker/n8n_security.test.mjs).
+[[routes]]
+pattern = "sales.webwizards.click"
+custom_domain = true
+
+# Secretos (npx wrangler secret put NOMBRE): AUTH_USERS, DENUE_TOKEN, WORKER_TOKEN, N8N_TOKEN, EVENTS_TOKEN,
+# CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD. Nunca en este archivo.

@@ -1,0 +1,21 @@
+{
+  "_nota": "Configuración operativa editable desde el dashboard (no son políticas). Las políticas viven en policies/ y el esquema en data/schema/; esos solo se cambian con aprobación de una persona.",
+  "objetivo_diario_calificados": 30,
+  "nichos": [
+    {"id": "dentista", "nombre": "Clínicas dentales", "prioridad": 1, "activo": true, "motivo": "Venta por citas, ticket alto, sitios con problemas verificables frecuentes (piloto Puebla)."},
+    {"id": "clinica", "nombre": "Consultorios médicos", "prioridad": 2, "activo": true, "motivo": "Agenda por teléfono muy común; alto valor de la cita."},
+    {"id": "estetica_spa", "nombre": "Estéticas y spas", "prioridad": 3, "activo": true, "motivo": "Dependen de Instagram/WhatsApp; reservas en línea como propuesta clara."},
+    {"id": "veterinaria", "nombre": "Veterinarias", "prioridad": 4, "activo": true, "motivo": "Urgencias y citas; menor ticket promedio."}
+  ],
+  "ciudades": [
+    {"nombre": "Puebla", "estado_mx": "Puebla", "activa": true},
+    {"nombre": "Ciudad de México", "estado_mx": "Ciudad de México", "activa": true},
+    {"nombre": "Guadalajara", "estado_mx": "Jalisco", "activa": true},
+    {"nombre": "Monterrey", "estado_mx": "Nuevo León", "activa": true},
+    {"nombre": "Querétaro", "estado_mx": "Querétaro", "activa": true}
+  ],
+  "capacidad_investigacion": {
+    "negocios_revisados_por_calificado_piloto": 6.7,
+    "nota": "Piloto 2026-11-11: ~20 negocios revisados → 3 calificados (A+B)."
+  }
+}

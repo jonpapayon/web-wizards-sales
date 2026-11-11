@@ -1,0 +1,63 @@
+{
+  "name": "WW Sales OS · 01 · Eventos del CRM → resumen interno",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [ { "field": "cronExpression", "expression": "*/15 9-18 * * 1-6" } ] }
+      },
+      "name": "Cada 15 min (L-S 9-19 h)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $getWorkflowStaticData('global');\nreturn [{ json: { since: s.cursor || '' } }];"
+      },
+      "name": "Leer cursor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ ($env.WW_API_BASE || 'http://127.0.0.1:8765') + '/api/events' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [ { "name": "since", "value": "={{ $json.since }}" }, { "name": "limit", "value": "500" } ] },
+        "options": {}
+      },
+      "name": "GET /api/events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0],
+      "notes": "Credencial Header Auth: nombre X-WW-Events-Token, valor = WW_EVENTS_TOKEN. Solo lectura."
+    },
+    {
+      "parameters": {
+        "jsCode": "const ev = $json.eventos || [];\nconst s = $getWorkflowStaticData('global');\nif (ev.length) s.cursor = ev[ev.length - 1].ts;\nconst pick = (t) => ev.filter(e => e.evento === t);\nreturn [{ json: {\n  nuevos_calificados: pick('lead.registrado').map(e => `${e.entidad} ${e.detalle.nombre} (${e.detalle.clasificacion})`),\n  borradores_listos: pick('borrador.listo').map(e => e.entidad),\n  aprobaciones: pick('aprobacion.humana').map(e => `${e.entidad} por ${e.detalle.aprobado_por}`),\n  respuestas: pick('respuesta.recibida').map(e => e.entidad),\n  bajas: pick('baja.registrada').map(e => e.entidad),\n  cambios_estado: pick('lead.estado_cambiado').map(e => `${e.entidad}: ${e.detalle.de} → ${e.detalle.a}`),\n  total_eventos: ev.length\n} }];"
+      },
+      "name": "Armar resumen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {},
+      "name": "Destino interno (pendiente de autorización)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [880, 0],
+      "notes": "Sustituir solo por un canal INTERNO autorizado (correo o chat del equipo). Nunca por mensajes a prospectos."
+    }
+  ],
+  "connections": {
+    "Cada 15 min (L-S 9-19 h)": { "main": [ [ { "node": "Leer cursor", "type": "main", "index": 0 } ] ] },
+    "Leer cursor": { "main": [ [ { "node": "GET /api/events", "type": "main", "index": 0 } ] ] },
+    "GET /api/events": { "main": [ [ { "node": "Armar resumen", "type": "main", "index": 0 } ] ] },
+    "Armar resumen": { "main": [ [ { "node": "Destino interno (pendiente de autorización)", "type": "main", "index": 0 } ] ] }
+  },
+  "settings": { "timezone": "America/Mexico_City" },
+  "active": false
+}
