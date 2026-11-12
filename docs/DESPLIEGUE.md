@@ -11,7 +11,7 @@ Arquitectura: un Worker (`cloudflare/src/`) que sirve la API y el dashboard (Wor
 | Worker `ww-sales` | **Producción en https://sales.webwizards.click** (dominio personalizado). `workers_dev = false`: la dirección workers.dev responde 404. |
 | Zona DNS `webwizards.click` | **Active en Cloudflare** (nameservers `asa`/`kobe.ns.cloudflare.com` puestos en Namecheap, donde sigue registrado el dominio). `@` y `www` en DNS only hacia Vercel (landing). |
 | Secretos | `AUTH_USERS` cargado. Faltan `WORKER_TOKEN` (solo investigador), `N8N_TOKEN`, `EVENTS_TOKEN`, `DENUE_TOKEN`, `CF_ACCESS_*` (opcionales). |
-| Correo | Pendiente: Cloudflare Email Routing para `contacto@webwizards.click` (sustituye los 5 MX `eforward*` y el SPF de Namecheap) + DMARC `p=none`. |
+| Correo | **Funcionando (2026-11-12).** Recepción: Cloudflare Email Routing `contacto@webwizards.click` → Gmail de la persona. Envío: Gmail «Enviar como» por `smtp.gmail.com` (contraseña de aplicación, nunca en el repositorio). SPF `v=spf1 include:_spf.mx.cloudflare.net include:_spf.google.com ~all`; DKIM de Email Routing `cf2024-1`; DMARC `p=none`. Prueba de envío y recepción a bandeja de entrada confirmada. Mejora futura: buzón con DKIM propio del dominio (Workspace o Zoho de pago) al crecer el volumen. |
 | Pendientes | Desactivar Cloudflare Web Analytics para `sales` (la CSP bloquea su script; el CRM no debe llevar analítica). Recomendado: Cloudflare Access. |
 
 ## Local primero
