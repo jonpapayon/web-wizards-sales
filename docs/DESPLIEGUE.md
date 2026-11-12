@@ -35,7 +35,12 @@ Todos los comandos desde `cloudflare/`.
 3. `npx wrangler d1 create ww-sales` → copia **solo** el `database_id` en `wrangler.toml`. Si Wrangler ofrece añadirlo a la configuración, responde **No**: su fragmento sugiere `binding = "ww_sales"`, pero el código usa `binding = "DB"`. **La región no se puede cambiar después.**
 4. `npx wrangler d1 migrations apply ww-sales --remote`
 5. `npx wrangler d1 execute ww-sales --remote --file seed/seed_real.sql` (una sola vez; si falla, D1 revierte todo).
-6. `npx wrangler deploy --secrets-file ../.dev.vars` — sube los secretos de `.dev.vars` (`AUTH_USERS`, `WORKER_TOKEN`, …) junto con el despliegue sin mostrarlos. Los despliegues posteriores no necesitan `--secrets-file`: los secretos nunca se borran al desplegar. Para añadir uno suelto: `npx wrangler secret put NOMBRE`. Comprobar nombres (no valores): `npx wrangler secret list`.
+6. `npx wrangler deploy` y después los secretos, uno por uno, **por tubería** (valor literal, sin mostrarlo):
+   ```bash
+   python3 -c 'import pathlib; v=[l.split("=",1)[1].strip().strip(chr(39)) for l in pathlib.Path("../.dev.vars").read_text().splitlines() if l.startswith("AUTH_USERS=")][-1]; print(v, end="")' | npx wrangler secret put AUTH_USERS
+   ```
+   (cambia `AUTH_USERS` en ambos sitios para `WORKER_TOKEN`, etc.). Los secretos nunca se borran al desplegar. Comprobar nombres (no valores): `npx wrangler secret list`.
+   - ⛔ **No uses `--secrets-file ../.dev.vars`:** desde Wrangler 4.153 expande `$VAR` en archivos dotenv y vacía las referencias inexistentes. Los hashes `pbkdf2_sha256$100000$<sal>$<hash>` de `AUTH_USERS` quedan corruptos y nadie puede iniciar sesión (pasó el 2026-11-11).
    - **No despliegues con el `database_id` de ejemplo:** Wrangler puede aprovisionar recursos por su cuenta.
    - Con `workers_dev = false` y sin rutas, el Worker queda sin URL pública. Para probar en `*.workers.dev`, activa `workers_dev = true` y añade el host a `ALLOWED_HOSTS` (si no, el Worker rechaza esas peticiones).
 
@@ -55,6 +60,7 @@ Todos los comandos desde `cloudflare/`.
 ## Lecciones aprendidas (despliegue del 2026-11-11)
 - **D1 limita los patrones `LIKE`/`GLOB` a 50 caracteres** (`LIKE or GLOB pattern too complex: SQLITE_ERROR`). El SQLite local no tiene ese límite, así que las pruebas locales pasaban y D1 rechazaba todos los `INSERT` en `leads`, `interactions` y `followups`. Corregido en `cloudflare/migrations/0003_d1_patrones.sql` (mismas reglas como largo + prefijo + `NOT GLOB '*[^0-9]*'`). `tests/test_migration.py › D1Compat` emula el límite: toda migración nueva debe pasarla.
 - **La CSP del Worker (`style-src 'self'`) bloquea los atributos `style`.** El dashboard aplicaba estilos con `setAttribute("style")` y las gráficas se rompían solo en Cloudflare (el servidor Python local usa otra CSP). `app/static/app.js` usa ahora `el.style.cssText`, que la CSP permite. No relajar la CSP; revisar la consola en Cloudflare tras cada cambio de interfaz.
+- **`--secrets-file` con dotenv corrompe valores con `$`** (Wrangler ≥ 4.153 expande `$VAR`): el `AUTH_USERS` subido así tenía el hash dañado y el login fallaba. Los secretos se suben con `wrangler secret put` por tubería (paso 6).
 - `cloudflare/package.json` tiene `"deploy": "bash ./deploy.sh"`, pero `deploy.sh` no existe: usa `npx wrangler deploy`.
 - `npx wrangler` no tiene versión fijada (desplegado con 4.160.1).
 - Al activar la zona, Cloudflare Web Analytics inyecta `static.cloudflareinsights.com/beacon.min.js`; la CSP lo bloquea (correcto). Se desactiva en el panel para `sales`, no se relaja la CSP.
