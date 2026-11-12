@@ -192,7 +192,7 @@ def staging_candidates():
         errs = crm.validate(SCHEMA, SCHEMA["$defs"]["leadCandidate"], cand, "candidato")
         cal = cand.get("calificacion")
         if cal and not errs:
-            errs += crm.check_qualification(SCHEMA, cal, cand.get("evidencias", []), cand.get("descalificadores", []))
+            errs += crm.check_qualification(SCHEMA, cal, cand.get("evidencias", []), cand.get("descalificadores", []), cand)
         exact, possible = crm.find_duplicates(cand, leads)
         out.append({"archivo": str(p.relative_to(ROOT)), "lote": p.parent.name, "nombre_negocio": cand.get("nombre_negocio"),
                     "nicho": cand.get("nicho"), "ciudad": cand.get("ciudad"), "sitio_web": cand.get("sitio_web", ""),

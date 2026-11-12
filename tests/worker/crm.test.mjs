@@ -232,3 +232,24 @@ test("agente (AGENT_TOKEN): sube y registra candidatos, redacta y recalifica; nu
   const ints = (await env.DB.prepare("SELECT direccion FROM interactions WHERE lead_id=?").bind(leadId).all()).results;
   assert.ok(!ints.some((i) => i.direccion === "saliente"), "el agente nunca genera interacciones salientes");
 });
+
+test("rúbrica v2 en el Worker: el agente recalifica con criterios coherentes; clase o volumen incoherentes se rechazan", async () => {
+  const AG = "tok-agente-0123456789abcdef";
+  const { call, env } = await setup({ seed: "demo", extraVars: { AGENT_TOKEN: AG } });
+  const post = (p, b) => call(p, { method: "POST", headers: { Authorization: `Bearer ${AG}`, "Content-Type": "application/json" }, body: JSON.stringify(b) });
+  const L = await env.DB.prepare("SELECT * FROM leads WHERE opt_out='false' AND senales_oportunidad <> '' LIMIT 1").first();
+  assert.ok(L, "el demo tiene un lead con señales");
+  const nr = String(L.num_resenas ?? ""), vol = /^\d+$/.test(nr) ? (+nr >= 50 ? 10 : +nr >= 20 ? 6 : 0) : 0;
+  const hasContact = ["telefono_e164", "whatsapp_publico", "email_publico", "instagram_url", "facebook_url"].some((f) => L[f]);
+  const crit = { citas: 20, whatsapp: L.whatsapp_publico ? 15 : 0, anuncios: 15, volumen: vol, tamano: 10, problema: 15, presencia: 5, contacto: hasContact ? 10 : 0 };
+  const total = Object.values(crit).reduce((a, x) => a + x, 0);
+  const cls = !hasContact ? (total >= 40 ? "C" : "descartado") : total >= 80 ? "A" : total >= 60 ? "B" : total >= 40 ? "C" : "descartado";
+  const set = (c, extra = {}) => ({ criterios: JSON.stringify(c), puntaje_icp: c.citas + c.presencia, puntaje_oportunidad: c.problema + c.whatsapp + c.volumen,
+    puntaje_contacto: c.contacto + c.tamano, puntaje_capacidad: c.anuncios, puntaje_total: Object.values(c).reduce((a, x) => a + x, 0), clasificacion: cls, ...extra });
+  assert.notEqual((await post(`/api/agent/leads/${L.lead_id}/update`, { set: set({ ...crit, volumen: vol === 10 ? 6 : 10 }) })).status, 200, "volumen que no corresponde a las reseñas");
+  assert.notEqual((await post(`/api/agent/leads/${L.lead_id}/update`, { set: set(crit, { clasificacion: cls === "A" ? "B" : "A" }) })).status, 200, "clase incoherente");
+  const ok = await post(`/api/agent/leads/${L.lead_id}/update`, { set: set(crit) });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  const after = await env.DB.prepare("SELECT criterios, clasificacion, puntaje_total FROM leads WHERE lead_id=?").bind(L.lead_id).first();
+  assert.deepEqual([JSON.parse(after.criterios), after.clasificacion, after.puntaje_total], [crit, cls, total]);
+});

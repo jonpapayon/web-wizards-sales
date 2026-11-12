@@ -141,6 +141,51 @@ class PilotIntact(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
 
 
+class RubricaV2(unittest.TestCase):
+    """Recalificación con x-rubrica-v2: bloques = suma de criterios; clase por umbrales 80/60/40; reglas de evidencia."""
+
+    def setUp(self):
+        self.root = temp_root()
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def plan(self, L):
+        senales = [x for x in L["senales_oportunidad"].split(";") if x]
+        nr = L["num_resenas"]
+        crit = {"citas": 20, "whatsapp": 15 if L["whatsapp_publico"] else 0, "anuncios": 15,
+                "volumen": (10 if int(nr) >= 50 else 6 if int(nr) >= 20 else 0) if nr.isdigit() else 0,
+                "tamano": 10, "problema": 15 if senales else 0, "presencia": 5,
+                "contacto": 10 if any(L[f] for f in ("telefono_e164", "whatsapp_publico", "email_publico", "instagram_url", "facebook_url")) else 0}
+        blocks = {"puntaje_icp": crit["citas"] + crit["presencia"], "puntaje_oportunidad": crit["problema"] + crit["whatsapp"] + crit["volumen"],
+                  "puntaje_contacto": crit["contacto"] + crit["tamano"], "puntaje_capacidad": crit["anuncios"]}
+        total = sum(crit.values())
+        cls = "descartado" if total < 40 else ("A" if total >= 80 else "B" if total >= 60 else "C") if senales and crit["contacto"] >= 7 else ("C" if total >= 40 else "descartado")
+        return crit, blocks, total, cls
+
+    def sets(self, crit, blocks, total, cls):
+        out = ["--set", f"criterios={json.dumps(crit)}", "--set", f"puntaje_total={total}", "--set", f"clasificacion={cls}"]
+        for k, v in blocks.items():
+            out += ["--set", f"{k}={v}"]
+        return out
+
+    def test_recalificacion_v2_coherente_e_incoherente(self):
+        L = next(x for x in read_csv(self.root, "leads") if x["opt_out"] == "false" and x["senales_oportunidad"])
+        crit, blocks, total, cls = self.plan(L)
+        code, out, err = tool(self.root, "update-lead", L["lead_id"], *self.sets(crit, blocks, total, "C" if cls != "C" else "B"))
+        self.assertNotEqual(code, 0, "una clase que no cuadra con los umbrales v2 se rechaza")
+        bad = dict(crit, volumen=10)
+        if bad != crit:
+            b2 = dict(blocks, puntaje_oportunidad=blocks["puntaje_oportunidad"] + 10 - crit["volumen"])
+            code, out, err = tool(self.root, "update-lead", L["lead_id"], *self.sets(bad, b2, total + 10 - crit["volumen"], cls))
+            self.assertNotEqual(code, 0, "volumen inventado sin reseñas se rechaza")
+        code, out, err = tool(self.root, "update-lead", L["lead_id"], *self.sets(crit, blocks, total, cls))
+        self.assertEqual(code, 0, out + err)
+        after = next(x for x in read_csv(self.root, "leads") if x["lead_id"] == L["lead_id"])
+        self.assertEqual((json.loads(after["criterios"]), after["clasificacion"]), (crit, cls))
+        self.assertEqual(tool(self.root, "validate")[0], 0)
+
+
 class PullD1(unittest.TestCase):
     """pull-d1: lo hecho en el dashboard (D1) llega al CRM local; D1 gana salvo bajas locales; IDs sin choques."""
 

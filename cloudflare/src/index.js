@@ -219,7 +219,7 @@ async function postRoutes(env, path, b, s, actor) {
 const AGENT_READ = ["lead_id", "nombre_negocio", "nombre_normalizado", "nicho", "subnicho", "ciudad", "estado_mx", "direccion", "sitio_web", "dominio",
   "telefono_e164", "whatsapp_publico", "email_publico", "google_place_id", "google_maps_url", "instagram_url", "facebook_url", "clasificacion",
   "puntaje_total", "estado_pipeline", "aprobacion_estado", "canal_preferido", "fecha_registro", "fecha_actualizacion", "opt_out"];
-const AGENT_SET = new Set(["puntaje_icp", "puntaje_oportunidad", "puntaje_contacto", "puntaje_capacidad", "puntaje_total", "clasificacion",
+const AGENT_SET = new Set(["criterios", "puntaje_icp", "puntaje_oportunidad", "puntaje_contacto", "puntaje_capacidad", "puntaje_total", "clasificacion",
   "motivo_clasificacion", "senales_oportunidad", "servicio_recomendado", "canal_preferido", "num_resenas", "calificacion_google", "google_maps_url",
   "google_place_id", "instagram_url", "facebook_url", "decisor_nombre", "decisor_cargo", "decisor_fuente_url", "notas", "estado_pipeline",
   "aprobacion_estado", "mensaje_inicial_id"]);

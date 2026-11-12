@@ -7,7 +7,18 @@ const STATE_LABEL = {
   reunion_agendada: "Demo programada", demo_realizada: "Demo realizada", propuesta_enviada: "Propuesta enviada", negociacion: "Negociación",
   ganado: "Ganado", perdido: "Perdido", pausado: "Seguimiento futuro", no_contactar: "No contactar",
 };
-const NICHO = { dentista: "Clínica dental", clinica: "Consultorio médico", estetica_spa: "Estética / spa", veterinaria: "Veterinaria", otro: "Otro" };
+const NICHO = { dentista: "Clínica dental", clinica: "Consultorio / clínica", estetica_spa: "Estética / spa", veterinaria: "Veterinaria",
+  belleza: "Salón, barbería, uñas", fitness: "Gimnasio, yoga, pilates", inmobiliaria: "Inmobiliaria", autos: "Agencia de autos", energia_solar: "Paneles solares",
+  construccion: "Construcción / remodelación", educacion: "Escuela / academia", viajes: "Agencia de viajes", industrial: "Proveedor industrial",
+  retail: "Tienda / retail", distribucion: "Distribuidora / mayorista", otro: "Otro" };
+const CRITERIO = { citas: ["Citas o reservaciones", 20], whatsapp: ["WhatsApp comercial", 15], anuncios: ["Actividad publicitaria", 15], volumen: ["Volumen / reseñas", 10],
+  tamano: ["Sucursales o personal", 10], problema: ["Problema operativo", 15], presencia: ["Presencia digital mejorable", 5], contacto: ["Contacto verificable", 10] };
+function scoreLine(L) {
+  let c = null; try { c = L.criterios ? JSON.parse(L.criterios) : null; } catch {}
+  if (!c) return `${L.puntaje_total}/100 · rúbrica v1 (ICP ${L.puntaje_icp} · Oportunidad ${L.puntaje_oportunidad} · Contacto ${L.puntaje_contacto} · Capacidad ${L.puntaje_capacidad})`;
+  return h("div", {}, h("div", {}, `${L.puntaje_total}/100 · rúbrica v2`), h("ul", { style: "margin:4px 0 0;padding-left:18px" },
+    Object.entries(CRITERIO).map(([k, [label, mx]]) => h("li", { class: c[k] ? "" : "faint" }, `${label}: ${c[k] ?? 0}/${mx}`))));
+}
 const MOTIVO = { sin_respuesta: "Sin respuesta", no_interesado: "No interesado", precio: "Precio", sin_presupuesto: "Sin presupuesto",
   ya_tiene_proveedor: "Ya tiene proveedor", no_es_momento: "No es el momento", fuera_de_perfil: "Fuera de perfil", otro: "Otro" };
 let NEEDS_DATE = new Set(["contactado", "en_conversacion", "interesado", "reunion_agendada", "demo_realizada", "propuesta_enviada", "negociacion", "pausado"]);
@@ -376,7 +387,7 @@ async function leadDetail(v, id) {
       h("div", { class: "card" }, h("h3", {}, "Datos verificados"), kv([["Negocio", L.nombre_negocio], ["Nicho", NICHO[L.nicho] || L.nicho], ["Ciudad", `${L.ciudad}, ${L.estado_mx}`], ["Dirección", L.direccion],
         ["Sitio web", L.sitio_web ? h("a", { href: L.sitio_web, target: "_blank", rel: "noopener noreferrer" }, L.sitio_web) : ""], ["Teléfono", L.telefono_publico], ["WhatsApp", L.whatsapp_publico], ["Email", L.email_publico],
         ["Fuente", h("span", {}, `${L.fuente} · `, h("a", { href: L.fuente_url, target: "_blank", rel: "noopener noreferrer" }, "ver"), ` · ${L.fecha_fuente}`)], ["Notas", L.notas]])),
-      h("div", { class: "card" }, h("h3", {}, "Calificación"), kv([["Puntaje", `${L.puntaje_total}/100 (ICP ${L.puntaje_icp} · Oportunidad ${L.puntaje_oportunidad} · Contacto ${L.puntaje_contacto} · Capacidad ${L.puntaje_capacidad})`],
+      h("div", { class: "card" }, h("h3", {}, "Calificación"), kv([["Puntaje", scoreLine(L)],
         ["Clase", badgeClass(L.clasificacion)], ["Motivo", L.motivo_clasificacion], ["Señales", L.senales_oportunidad.split(";").filter(Boolean).map((x) => h("span", { class: "badge accent", style: "margin:0 4px 4px 0" }, x))],
         ["Servicio propuesto", L.servicio_recomendado.replaceAll(";", ", ")], ["Canal preferido", L.canal_preferido], ["Estado", stateEl(L.estado_pipeline)], ["Aprobación", L.aprobacion_estado + (L.aprobado_por ? ` · ${L.aprobado_por}` : "")],
         ["Próxima acción", d.proxima_accion]]))),

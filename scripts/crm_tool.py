@@ -322,7 +322,57 @@ def evidence_confidence(evidencias, senal):
     return max(vals, key=lambda x: rank[x]) if vals else None
 
 
-def check_qualification(schema, cal, evidencias, descalificadores):
+def expected_class_v2(schema, cal, descalificadores):
+    r = schema["x-rubrica-v2"]
+    total, n, contacto = cal["puntaje_total"], len(cal["senales_oportunidad"]), cal["criterios"]["contacto"]
+    if descalificadores or total < r["descartado_si_total_menor_a"]:
+        return "descartado"
+    for k in ("A", "B"):
+        c = r[k]
+        if total >= c["total_min"] and n >= c["senales_min"] and contacto >= c["contacto_min"]:
+            return k
+    return "C"
+
+
+def check_qualification_v2(schema, cal, evidencias, descalificadores, rec):
+    """Rúbrica v2 (x-rubrica-v2): 8 criterios agrupados en los 4 bloques de puntaje. `rec` = candidato o lead."""
+    r, crit, errs = schema["x-rubrica-v2"], cal["criterios"], []
+    for k, mx in r["maximos"].items():
+        v = crit.get(k)
+        if not isinstance(v, int) or not 0 <= v <= mx:
+            errs.append(f"criterios.{k} debe ser entero entre 0 y {mx}")
+    if errs:
+        return errs
+    for bloque, keys in r["bloques"].items():
+        if cal[bloque] != sum(crit[k] for k in keys):
+            errs.append(f"{bloque} {cal[bloque]} ≠ {' + '.join(keys)} = {sum(crit[k] for k in keys)}")
+    if cal["puntaje_total"] != sum(crit.values()):
+        errs.append(f"puntaje_total {cal['puntaje_total']} ≠ suma de criterios {sum(crit.values())}")
+    missing = [x for x in cal["senales_oportunidad"] if evidence_confidence(evidencias, x) is None]
+    if missing:
+        errs.append(f"señales sin evidencia: {missing}")
+    weak = [x for x in cal["senales_oportunidad"] if evidence_confidence(evidencias, x) == "baja"]
+    if weak:
+        errs.append(f"PENDIENTE DE REVISIÓN: señales solo con evidencia de confianza baja {weak}; verifícalas (o quítalas) antes de registrar")
+    if crit["problema"] and not cal["senales_oportunidad"]:
+        errs.append("criterios.problema > 0 exige al menos una señal del catálogo con evidencia")
+    if crit["whatsapp"] > 8 and not rec.get("whatsapp_publico"):
+        errs.append("criterios.whatsapp > 8 exige whatsapp_publico verificado")
+    if crit["contacto"] and not any(rec.get(f) for f in CONTACT_FIELDS):
+        errs.append("criterios.contacto > 0 exige al menos un canal de contacto verificado")
+    nr = str(rec.get("num_resenas") or "").strip()
+    exp_vol = next(x["puntos"] for x in r["volumen_por_resenas"] if int(nr) >= x["min"]) if nr.isdigit() else 0
+    if crit["volumen"] != exp_vol:
+        errs.append(f"criterios.volumen {crit['volumen']} ≠ {exp_vol} según num_resenas={nr or 'desconocido'} (sin dato = 0)")
+    exp = expected_class_v2(schema, cal, descalificadores)
+    if cal["clasificacion"] != exp:
+        errs.append(f"clasificación {cal['clasificacion']} ≠ {exp} según x-rubrica-v2")
+    return errs
+
+
+def check_qualification(schema, cal, evidencias, descalificadores, rec=None):
+    if cal.get("criterios"):
+        return check_qualification_v2(schema, cal, evidencias, descalificadores, rec or {})
     errs = []
     parts = cal["puntaje_icp"] + cal["puntaje_oportunidad"] + cal["puntaje_contacto"] + cal["puntaje_capacidad"]
     if parts != cal["puntaje_total"]:
@@ -591,7 +641,7 @@ def add_lead(schema, staging, dry_run=False, sucursal_de=None, por="cli"):
     if errs:
         raise CRMError("Candidato inválido:\n - " + "\n - ".join(errs))
     cal = cand["calificacion"]
-    q = check_qualification(schema, cal, cand["evidencias"], cand.get("descalificadores", []))
+    q = check_qualification(schema, cal, cand["evidencias"], cand.get("descalificadores", []), cand)
     if cal["clasificacion"] in ("A", "B") and not any(cand.get(f) for f in CONTACT_FIELDS):
         q.append("PENDIENTE DE REVISIÓN: clase A/B sin ningún canal de contacto verificado en los datos "
                  "(teléfono, WhatsApp, email o red del negocio). Un puntaje alto no compensa contacto no verificado.")
@@ -621,7 +671,7 @@ def add_lead(schema, staging, dry_run=False, sucursal_de=None, por="cli"):
                 row[k] = to_cell(v)
         for k, v in cal.items():
             if k in row:
-                row[k] = to_cell(v)
+                row[k] = json.dumps(v, ensure_ascii=False, sort_keys=True) if isinstance(v, dict) else to_cell(v)
         row.update({
             "lead_id": lead_id, "fecha_registro": ts, "fecha_actualizacion": ts,
             "nombre_normalizado": normalize_name(cand["nombre_negocio"]),
@@ -725,13 +775,18 @@ def cmd_update_lead(schema, a):
             if prob:
                 raise CRMError(f"proximo_seguimiento cae en {prob}; elige un día hábil (policies/contact-cadence.md §4).")
         score_fields = {"puntaje_icp", "puntaje_oportunidad", "puntaje_contacto", "puntaje_capacidad", "puntaje_total",
-                        "clasificacion", "senales_oportunidad"}
+                        "clasificacion", "senales_oportunidad", "criterios", "num_resenas", "whatsapp_publico"}
         L.update(changes)
         if score_fields & set(changes):
             cal = {k: int(L[k]) for k in ("puntaje_icp", "puntaje_oportunidad", "puntaje_contacto", "puntaje_capacidad", "puntaje_total")}
             cal["clasificacion"] = L["clasificacion"]
             cal["senales_oportunidad"] = [x for x in L["senales_oportunidad"].split(";") if x]
-            q = check_qualification(schema, cal, [{"senal": x} for x in cal["senales_oportunidad"]], [])
+            if L.get("criterios"):
+                try:
+                    cal["criterios"] = json.loads(L["criterios"])
+                except ValueError:
+                    raise CRMError("criterios debe ser JSON, p. ej. {\"citas\":20,\"whatsapp\":15,...}")
+            q = check_qualification(schema, cal, [{"senal": x} for x in cal["senales_oportunidad"]], [], L)
             if q:
                 raise CRMError("Recalificación incoherente:\n - " + "\n - ".join(q))
         if new in schema["x-estados-finales"]:

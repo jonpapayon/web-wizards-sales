@@ -66,7 +66,8 @@ export async function updateLead(env, leadId, changes, actor, nota = "", approve
     const senales = String(M.senales_oportunidad || "").split(";").filter(Boolean);
     const cal = { puntaje_icp: +M.puntaje_icp, puntaje_oportunidad: +M.puntaje_oportunidad, puntaje_contacto: +M.puntaje_contacto,
       puntaje_capacidad: +M.puntaje_capacidad, puntaje_total: +M.puntaje_total, clasificacion: M.clasificacion, senales_oportunidad: senales };
-    const q2 = checkQualification(cal, senales.map((s) => ({ senal: s, confianza: "media" })), []);
+    if (M.criterios) { try { cal.criterios = JSON.parse(M.criterios); } catch { throw new CRMError("criterios debe ser JSON."); } }
+    const q2 = checkQualification(cal, senales.map((s) => ({ senal: s, confianza: "media" })), [], M);
     if (q2.length) throw new CRMError("Recalificación incoherente:\n - " + q2.join("\n - "));
   }
   if (nota) M.notas = `${M.notas ? M.notas + " | " : ""}${todayIso()} ${String(nota).slice(0, 500)}`;
@@ -172,7 +173,7 @@ export async function candidateChecks(env, c, leads, supp) {
   const cal = cand.calificacion;
   if (!cal) errs.push("candidato.calificacion: obligatorio para registrar (calificar primero)");
   else if (!errs.length) {
-    errs.push(...checkQualification(cal, cand.evidencias || [], cand.descalificadores || []));
+    errs.push(...checkQualification(cal, cand.evidencias || [], cand.descalificadores || [], cand));
     if (["A", "B"].includes(cal.clasificacion) && !CONTACT_FIELDS.some((f) => cand[f]))
       errs.push("PENDIENTE DE REVISIÓN: clase A/B sin ningún canal de contacto verificado en los datos. Un puntaje alto no compensa contacto no verificado.");
   }
@@ -265,7 +266,7 @@ export async function registerCandidate(env, cid, actor, sucursalDe = null) {
   const dom = domainOf(cand.sitio_web || "");
   const row = Object.fromEntries(HEADERS.lead.map((k) => [k, ""]));
   for (const [k, v] of Object.entries(cand)) if (k in row) row[k] = toCell(v);
-  for (const [k, v] of Object.entries(cal)) if (k in row) row[k] = toCell(v);
+  for (const [k, v] of Object.entries(cal)) if (k in row) row[k] = v && typeof v === "object" && !Array.isArray(v) ? JSON.stringify(v) : toCell(v);
   Object.assign(row, { lead_id: leadId, fecha_registro: ts, fecha_actualizacion: ts, nombre_normalizado: normalizeName(cand.nombre_negocio),
     dominio: !dom || isGeneric(dom) ? "" : dom, zona_horaria: cand.zona_horaria || tzFor(cand.estado_mx), evidencias: `data/research/${leadId}.md`,
     estado_pipeline: cal.clasificacion === "descartado" ? "descartado" : "calificado", aprobacion_estado: "no_aplica", num_seguimientos: "0",

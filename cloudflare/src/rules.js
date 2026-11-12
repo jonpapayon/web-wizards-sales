@@ -130,7 +130,33 @@ export function evidenceConfidence(evid, senal) {
   const rank = { alta: 3, media: 2, baja: 1 }; const vals = evid.filter((e) => e.senal === senal).map((e) => e.confianza || "media");
   return vals.length ? vals.sort((a, b) => rank[b] - rank[a])[0] : null;
 }
-export function checkQualification(cal, evid, descalificadores = []) {
+// Rúbrica v2 (x-rubrica-v2): mismas reglas que scripts/crm_tool.py › check_qualification_v2.
+export function expectedClassV2(cal, descalificadores = []) {
+  const r = SCHEMA["x-rubrica-v2"];
+  if (descalificadores.length || cal.puntaje_total < r.descartado_si_total_menor_a) return "descartado";
+  for (const k of ["A", "B"]) { const c = r[k]; if (cal.puntaje_total >= c.total_min && cal.senales_oportunidad.length >= c.senales_min && cal.criterios.contacto >= c.contacto_min) return k; }
+  return "C";
+}
+export function checkQualificationV2(cal, evid, descalificadores = [], rec = {}) {
+  const r = SCHEMA["x-rubrica-v2"], crit = cal.criterios, errs = [];
+  for (const [k, mx] of Object.entries(r.maximos)) if (!Number.isInteger(crit[k]) || crit[k] < 0 || crit[k] > mx) errs.push(`criterios.${k} debe ser entero entre 0 y ${mx}`);
+  if (errs.length) return errs;
+  for (const [b, keys] of Object.entries(r.bloques)) { const s = keys.reduce((a, k) => a + crit[k], 0); if (cal[b] !== s) errs.push(`${b} ${cal[b]} ≠ ${keys.join(" + ")} = ${s}`); }
+  const sum = Object.values(crit).reduce((a, x) => a + x, 0); if (cal.puntaje_total !== sum) errs.push(`puntaje_total ${cal.puntaje_total} ≠ suma de criterios ${sum}`);
+  const missing = cal.senales_oportunidad.filter((x) => evidenceConfidence(evid, x) === null); if (missing.length) errs.push(`señales sin evidencia: ${missing}`);
+  const weak = cal.senales_oportunidad.filter((x) => evidenceConfidence(evid, x) === "baja");
+  if (weak.length) errs.push(`PENDIENTE DE REVISIÓN: señales solo con evidencia de confianza baja ${weak}; verifícalas (o quítalas) antes de registrar`);
+  if (crit.problema && !cal.senales_oportunidad.length) errs.push("criterios.problema > 0 exige al menos una señal del catálogo con evidencia");
+  if (crit.whatsapp > 8 && !rec.whatsapp_publico) errs.push("criterios.whatsapp > 8 exige whatsapp_publico verificado");
+  if (crit.contacto && !CONTACT_FIELDS.some((f) => rec[f])) errs.push("criterios.contacto > 0 exige al menos un canal de contacto verificado");
+  const nr = String(rec.num_resenas ?? "").trim();
+  const expVol = /^\d+$/.test(nr) ? r.volumen_por_resenas.find((x) => +nr >= x.min).puntos : 0;
+  if (crit.volumen !== expVol) errs.push(`criterios.volumen ${crit.volumen} ≠ ${expVol} según num_resenas=${nr || "desconocido"} (sin dato = 0)`);
+  const exp = expectedClassV2(cal, descalificadores); if (cal.clasificacion !== exp) errs.push(`clasificación ${cal.clasificacion} ≠ ${exp} según x-rubrica-v2`);
+  return errs;
+}
+export function checkQualification(cal, evid, descalificadores = [], rec = {}) {
+  if (cal.criterios) return checkQualificationV2(cal, evid, descalificadores, rec);
   const errs = []; const parts = cal.puntaje_icp + cal.puntaje_oportunidad + cal.puntaje_contacto + cal.puntaje_capacidad;
   if (parts !== cal.puntaje_total) errs.push(`puntaje_total ${cal.puntaje_total} ≠ suma de subpuntajes ${parts}`);
   const missing = cal.senales_oportunidad.filter((x) => evidenceConfidence(evid, x) === null); if (missing.length) errs.push(`señales sin evidencia: ${missing}`);

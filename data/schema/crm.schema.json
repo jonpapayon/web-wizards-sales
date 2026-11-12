@@ -30,6 +30,17 @@
         "dentista",
         "estetica_spa",
         "veterinaria",
+        "belleza",
+        "fitness",
+        "inmobiliaria",
+        "autos",
+        "energia_solar",
+        "construccion",
+        "educacion",
+        "viajes",
+        "industrial",
+        "retail",
+        "distribucion",
         "otro"
       ]
     },
@@ -88,6 +99,13 @@
     },
     "servicio": {
       "enum": [
+        "citas_whatsapp",
+        "seguimiento_comercial",
+        "agente_ia",
+        "web_conversion",
+        "sistema_interno",
+        "reputacion",
+        "integraciones",
         "sitio_nuevo",
         "rediseno_web",
         "whatsapp_integracion",
@@ -95,6 +113,62 @@
         "automatizacion",
         "seo_local"
       ]
+    },
+    "criteriosV2": {
+      "type": "object",
+      "required": [
+        "citas",
+        "whatsapp",
+        "anuncios",
+        "volumen",
+        "tamano",
+        "problema",
+        "presencia",
+        "contacto"
+      ],
+      "properties": {
+        "citas": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "whatsapp": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "anuncios": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "volumen": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "tamano": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "problema": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "presencia": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "contacto": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        }
+      },
+      "additionalProperties": false
     },
     "estadoPipeline": {
       "enum": [
@@ -373,6 +447,9 @@
         },
         "calificado_en": {
           "$ref": "#/$defs/fechaHora"
+        },
+        "criterios": {
+          "$ref": "#/$defs/criteriosV2"
         }
       },
       "additionalProperties": false
@@ -712,6 +789,9 @@
               "$ref": "#/$defs/vacio"
             }
           ]
+        },
+        "criterios": {
+          "type": "string"
         }
       },
       "allOf": [
@@ -1241,5 +1321,63 @@
       "contacto_min": 10
     },
     "resto": "C"
+  },
+  "x-clasificacion-nota": "x-clasificacion es la rúbrica v1 (heredada): solo aplica a leads sin `criterios`. Todo lead nuevo o recalificado usa x-rubrica-v2.",
+  "x-rubrica-v2": {
+    "maximos": {
+      "citas": 20,
+      "whatsapp": 15,
+      "anuncios": 15,
+      "volumen": 10,
+      "tamano": 10,
+      "problema": 15,
+      "presencia": 5,
+      "contacto": 10
+    },
+    "bloques": {
+      "puntaje_icp": [
+        "citas",
+        "presencia"
+      ],
+      "puntaje_oportunidad": [
+        "problema",
+        "whatsapp",
+        "volumen"
+      ],
+      "puntaje_contacto": [
+        "contacto",
+        "tamano"
+      ],
+      "puntaje_capacidad": [
+        "anuncios"
+      ]
+    },
+    "volumen_por_resenas": [
+      {
+        "min": 50,
+        "puntos": 10
+      },
+      {
+        "min": 20,
+        "puntos": 6
+      },
+      {
+        "min": 0,
+        "puntos": 0
+      }
+    ],
+    "descartado_si_total_menor_a": 40,
+    "A": {
+      "total_min": 80,
+      "senales_min": 1,
+      "contacto_min": 7
+    },
+    "B": {
+      "total_min": 60,
+      "senales_min": 1,
+      "contacto_min": 7
+    },
+    "resto": "C",
+    "nota": "contacto_min se compara con criterios.contacto (canal verificado). A y B exigen además al menos una señal con evidencia. Detalle de cada criterio: .claude/skills/lead-qualification/SKILL.md."
   }
 }
