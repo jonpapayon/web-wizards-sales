@@ -36,11 +36,11 @@ Meta: **30 leads calificados (A o B) por día**, sin duplicados, con fuente y fe
 ## Flujo del sistema
 
 ```
-lead-research ─► lead-qualification ─► crm_tool add-lead ─► personalized-outreach ─► compliance-reviewer ─► [APROBACIÓN HUMANA] ─► envío por una persona ─► follow-up
-   (dossier + staging)     (calificación)      (validación)          (borrador)                                                         (registro con crm_tool)
+lead-research ─► lead-qualification ─► ww_remote submit/register ─► personalized-outreach ─► compliance-reviewer ─► ww_remote draft/update ─► [APROBACIÓN HUMANA en el dashboard] ─► envío por una persona ─► follow-up
+   (dossier + staging)     (calificación)    (validación en el Worker, D1)         (borrador)                                        (pendiente_aprobacion)
 ```
 
-La **sesión principal** orquesta: lanza subagentes, recoge sus resultados y ejecuta `scripts/crm_tool.py`. Los subagentes no se llaman entre sí. El procedimiento diario está en `workflows/daily-pipeline.md`.
+La **sesión principal** orquesta: lanza subagentes, recoge sus resultados y sube todo al CRM en línea con `scripts/ww_remote.py` (D1 es la fuente principal; el usuario pide los leads en esta conversación y los revisa en `sales.webwizards.click`). Los subagentes no se llaman entre sí ni tienen red hacia el CRM. Antes de investigar, `ww_remote.py leads` da la lista actual para deduplicar. El procedimiento diario está en `workflows/daily-pipeline.md`. `crm_tool.py` y los CSV quedan como modo local, demo y respaldo.
 
 ## Mapa del proyecto
 
@@ -50,7 +50,8 @@ La **sesión principal** orquesta: lanza subagentes, recoge sus resultados y eje
 | `.claude/skills/<skill>/SKILL.md` | Procedimientos de cada etapa (5 skills). |
 | `.claude/agents/*.md` | Subagentes especializados. |
 | `.claude/settings.json` | Permisos y hook de protección (Claude Code). |
-| `scripts/crm_tool.py` | **Única vía de escritura al CRM**; valida esquema, duplicados, supresión, transiciones y aprobaciones. |
+| `scripts/ww_remote.py` | **Escritura al CRM en línea (D1)** con `AGENT_TOKEN`: leads para deduplicar, candidatos, registro, dossiers, borradores, recalificación. El Worker valida todo. |
+| `scripts/crm_tool.py` | Escritura al CRM **local** (CSV: modo local, demo y respaldo); valida esquema, duplicados, supresión, transiciones y aprobaciones. |
 | `scripts/hooks/guard.py` | Hook que bloquea envíos, red saliente y escritura directa al CRM. |
 | `scripts/tests/test_guard.py` | Pruebas del hook. |
 | `data/crm-schema.md`, `data/schema/crm.schema.json` | Diccionario y esquema del CRM. |
@@ -119,7 +120,7 @@ Una regla escrita no es una restricción técnica: lo que realmente se bloquea, 
 - `cloudflare/` Worker (API + dashboard), `cloudflare/migrations/` esquema D1, `wrangler.toml`. Estado, pasos y lecciones: `docs/DESPLIEGUE.md`. Nunca ejecutar `wrangler` (bloqueado): los comandos los corre una persona.
 - CRM en `https://sales.webwizards.click` (Worker, dominio personalizado) con D1 `ww-sales` (WNAM); `workers_dev = false`. La landing `webwizards.click`/`www` es otro proyecto (Next.js en Vercel, repo `web-wizards-v2`): no se toca desde aquí.
 - DNS de `webwizards.click` en Cloudflare (dominio registrado en Namecheap). Cualquier cambio DNS, de dominio o de ruta requiere autorización expresa; la prueba de `tests/worker/n8n_security.test.mjs` solo admite la ruta `sales.webwizards.click`.
-- D1 es la fuente principal. Sincronización (procedimiento en `docs/DESPLIEGUE.md`): una persona exporta D1 → `crm_tool.py pull-d1` (dashboard → local) → `d1_migrate.py delta` (altas locales → D1) → una persona aplica el delta. Hacer `pull-d1` **antes** de trabajar en local. Rangos de IDs: local WW 001–499 e INT/FU 0001–4999; Worker 500+/5000+.
+- D1 es la fuente principal y se escribe directo con `scripts/ww_remote.py`. La sincronización manual (exportar D1 → `crm_tool.py pull-d1` → `d1_migrate.py delta` → aplicar) queda solo como respaldo; procedimiento en `docs/DESPLIEGUE.md`. Rangos de IDs: local WW 001–499 e INT/FU 0001–4999; Worker 500+/5000+.
 - D1 limita `LIKE`/`GLOB` a 50 caracteres: toda migración nueva debe pasar `tests/test_migration.py › D1Compat`. La CSP del Worker bloquea atributos `style`: en `app/static/` usar `el.style`, nunca `setAttribute("style")` ni estilos en línea.
 - `dev/` ejecuta el Worker en local con D1 emulado: `bin/ww dev`. `data/d1/` y `cloudflare/seed/` contienen datos del CRM: no se editan a mano.
 - `research/investigator.py` (Mac, Playwright solo lectura), `cloudflare/src/denue.js` (INEGI), `integrations/n8n/` (7 workflows).
@@ -133,4 +134,4 @@ Reglas para trabajar en el sistema:
 - Remitente por defecto en borradores: "equipo comercial de Web Wizards". Nunca afirmar experiencia o clientes previos no demostrados.
 - Evidencia: indicar `confianza` (alta: HTML crudo o navegador; media: WebFetch; baja: fragmento de buscador). Lo leído con WebFetch es confianza media y requiere confirmación humana en navegador antes de enviar.
 - Antes de dar por terminado un cambio de código: `python3 tests/run_all.py`.
-- La red por consola está bloqueada; la investigación en vivo usa los subagentes (WebSearch/WebFetch). Activar `research/` con red requiere autorización explícita de una persona.
+- La red por consola está bloqueada, con una sola excepción autorizada: `python3 scripts/ww_remote.py` hacia `sales.webwizards.click` con `AGENT_TOKEN` (ámbito «agente»: no aprueba, no envía, no da de baja). La investigación en vivo usa los subagentes (WebSearch/WebFetch) y Chrome en solo lectura (Playwright). Activar `research/` con red requiere autorización explícita de una persona.

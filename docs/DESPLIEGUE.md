@@ -51,7 +51,19 @@ Todos los comandos desde `cloudflare/`.
 4. Recomendado: Cloudflare Access (Zero Trust, gratis hasta 50 usuarios) delante del dominio; define `CF_ACCESS_TEAM_DOMAIN` y `CF_ACCESS_AUD` y el Worker validará el JWT.
 5. Más adelante: activar DNSSEC en Cloudflare y publicar el DS en Namecheap.
 
-## Sincronizar el CRM local con D1 (en los dos sentidos)
+## Escritura directa del agente (AGENT_TOKEN)
+Claude sube candidatos, registros, dossiers y borradores directo a D1 con `scripts/ww_remote.py` (permiso «agente»: no aprueba, no envía, no da de baja). Lo configura una persona, una vez:
+
+```bash
+cd /Users/jonpapayon/Desktop/web-wizards-sales
+echo "AGENT_TOKEN=$(python3 scripts/ww_auth.py token)" >> .dev.vars        # crea la llave (no se muestra)
+cd cloudflare
+python3 -c 'import pathlib; v=[l.split("=",1)[1].strip().strip(chr(39)) for l in pathlib.Path("../.dev.vars").read_text().splitlines() if l.startswith("AGENT_TOKEN=")][-1]; print(v, end="")' | npx wrangler secret put AGENT_TOKEN
+npx wrangler deploy
+```
+Comprobar: `python3 scripts/ww_remote.py ping`. Revocar: `npx wrangler secret delete AGENT_TOKEN` (o rotar con los mismos pasos).
+
+## Sincronizar el CRM local con D1 (respaldo; en los dos sentidos)
 D1 es la fuente principal. El pipeline local (`crm_tool.py`, CSV) registra leads nuevos; el dashboard registra aprobaciones, envíos y bajas.
 
 **Rangos de IDs separados** (nunca chocan): el CRM local numera WW 001–499 e INT/FU 0001–4999 por día; el Worker WW 500–999 e INT/FU 5000–9999 (`cloudflare/src/db.js › nextId`, `scripts/crm_tool.py › next_id`).

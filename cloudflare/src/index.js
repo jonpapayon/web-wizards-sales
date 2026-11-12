@@ -215,8 +215,58 @@ async function postRoutes(env, path, b, s, actor) {
 }
 
 // Ámbitos: worker (investigador) · n8n (lectura + tareas internas) · events (solo eventos). Ninguno puede aprobar, dar de baja ni registrar leads.
+// Campos de lead que el agente puede leer (para deduplicar y trabajar) y modificar (calificación y borradores).
+const AGENT_READ = ["lead_id", "nombre_negocio", "nombre_normalizado", "nicho", "subnicho", "ciudad", "estado_mx", "direccion", "sitio_web", "dominio",
+  "telefono_e164", "whatsapp_publico", "email_publico", "google_place_id", "google_maps_url", "instagram_url", "facebook_url", "clasificacion",
+  "puntaje_total", "estado_pipeline", "aprobacion_estado", "canal_preferido", "fecha_registro", "fecha_actualizacion", "opt_out"];
+const AGENT_SET = new Set(["puntaje_icp", "puntaje_oportunidad", "puntaje_contacto", "puntaje_capacidad", "puntaje_total", "clasificacion",
+  "motivo_clasificacion", "senales_oportunidad", "servicio_recomendado", "canal_preferido", "num_resenas", "calificacion_google", "google_maps_url",
+  "google_place_id", "instagram_url", "facebook_url", "decisor_nombre", "decisor_cargo", "decisor_fuente_url", "notas", "estado_pipeline",
+  "aprobacion_estado", "mensaje_inicial_id"]);
+const AGENT_STATES = new Set(["mensaje_borrador", "pendiente_aprobacion", "descartado"]);  // nunca aprobado, contactado ni posteriores
+
+async function agentRoutes(env, req, path, url, actor) {
+  const b = req.method === "POST" ? await body(req) : {};
+  if (req.method === "GET" && path === "/api/agent/leads")
+    return json(200, { leads: (await all(env, "SELECT * FROM leads ORDER BY lead_id")).map((L) => Object.fromEntries(AGENT_READ.map((k) => [k, L[k] ?? ""]))) });
+  let m = path.match(new RegExp(`^/api/agent/leads/${LEAD}$`));
+  if (req.method === "GET" && m) {
+    const L = await crm.getLead(env, m[1]);
+    const d = await views.leadDetail(env, m[1], L);
+    return json(200, { lead: L, dossier: d.dossier, evidencia: d.evidencia, borradores: d.borradores, transiciones: d.transiciones, bloqueado: d.bloqueado });
+  }
+  if (req.method === "GET" && path === "/api/agent/candidates")
+    return json(200, { candidatos: (await all(env, "SELECT id, lote, data, dossier, creado_en FROM candidates WHERE estado='revision' ORDER BY creado_en"))
+      .map((c) => ({ id: c.id, lote: c.lote, creado_en: c.creado_en, data: JSON.parse(c.data), dossier: c.dossier })) });
+  if (req.method === "POST" && path === "/api/agent/candidates") return json(200, { ok: true, resultado: await crm.submitAgentCandidate(env, b, actor) });
+  m = path.match(/^\/api\/agent\/candidates\/([A-Za-z0-9._\/-]{3,200})\/(register|reject)$/);
+  if (req.method === "POST" && m) {
+    if (m[2] === "register") return json(200, { ok: true, resultado: await crm.registerCandidate(env, m[1], actor, b.sucursal_de ? str(b.sucursal_de, 20) : null) });
+    return json(200, { ok: true, resultado: await crm.rejectCandidate(env, m[1], str(b.motivo, 500) || "rechazado por el agente", actor) });
+  }
+  m = path.match(new RegExp(`^/api/agent/leads/${LEAD}/(draft|doc|update)$`));
+  if (req.method === "POST" && m) {
+    const [, id, op] = m;
+    if (op === "draft") return json(200, { ok: true, resultado: await crm.saveDraft(env, id, str(b.content, 50000), actor) });
+    if (op === "doc") {
+      const kind = str(b.kind, 20);
+      if (!["dossier", "evidencia"].includes(kind)) throw new CRMError("kind debe ser dossier o evidencia.");
+      return json(200, { ok: true, resultado: await crm.saveLeadDoc(env, id, kind, str(b.content, 200000), actor) });
+    }
+    const set = b.set && typeof b.set === "object" ? b.set : {};
+    const bad = Object.keys(set).filter((k) => !AGENT_SET.has(k));
+    if (bad.length) throw new CRMError(`El agente no puede modificar: ${bad.join(", ")}.`);
+    if (set.estado_pipeline && !AGENT_STATES.has(set.estado_pipeline)) throw new CRMError("El agente solo mueve a borrador, pendiente de aprobación o descartado. Aprobar y contactar son decisiones humanas.");
+    if (set.aprobacion_estado && set.aprobacion_estado !== "pendiente") throw new CRMError("El agente solo puede marcar la aprobación como pendiente.");
+    const ch = Object.fromEntries(Object.entries(set).map(([k, v]) => [k, str(v, 2000)]));
+    return json(200, { ok: true, resultado: await crm.updateLead(env, id, ch, actor, str(b.nota), null, { recalificar: true }) });
+  }
+  return json(403, { ok: false, error: "Ruta no permitida para el agente." });
+}
+
 async function machineRoutes(env, req, path, url, scope) {
   const actor = scope === "worker" ? "investigador" : scope;
+  if (scope === "agente") return agentRoutes(env, req, path, url, "agente:claude");  // sin acceso a /api/events (auditoría con IPs)
   if (req.method === "GET" && path === "/api/events") return json(200, await events(env, url));
   if (scope === "events") return json(403, { ok: false, error: "El token de eventos solo puede leer /api/events." });
   if (scope === "worker") {

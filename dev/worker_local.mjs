@@ -15,7 +15,7 @@ const DB_PATH = resolve(REPO, arg("db", "data/d1/local.sqlite"));
 const VARS = resolve(REPO, arg("vars", ".dev.vars"));
 const STATIC = join(REPO, "app", "static");
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".png": "image/png", ".svg": "image/svg+xml" };
-const KEYS = ["AUTH_USERS", "DENUE_TOKEN", "WORKER_TOKEN", "N8N_TOKEN", "EVENTS_TOKEN", "CF_ACCESS_TEAM_DOMAIN", "CF_ACCESS_AUD", "WW_ENTORNO"];
+const KEYS = ["AUTH_USERS", "DENUE_TOKEN", "WORKER_TOKEN", "AGENT_TOKEN", "N8N_TOKEN", "EVENTS_TOKEN", "CF_ACCESS_TEAM_DOMAIN", "CF_ACCESS_AUD", "WW_ENTORNO"];
 
 export function loadVars(file) {
   const v = {};

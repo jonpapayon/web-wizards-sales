@@ -136,5 +136,68 @@ class EndToEnd(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+@unittest.skipUnless(shutil.which("node"), "node no instalado")
+class RemoteAgent(unittest.TestCase):
+    """scripts/ww_remote.py contra el Worker local real con AGENT_TOKEN: subir, registrar, redactar; sin aprobar."""
+    TOKEN = "tok-agente-e2e-abcdef123456"
+
+    def test_flow(self):
+        from _util import temp_root
+        root = temp_root()
+        tmp = Path(tempfile.mkdtemp(prefix="ww-remote-"))
+        port = free_port()
+        vars_ = tmp / "dev.vars"
+        vars_.write_text(f"AGENT_TOKEN={self.TOKEN}\n", encoding="utf-8")
+        db = tmp / "remote.sqlite"
+        env = dict(os.environ, WW_ROOT=str(root))
+        r = subprocess.run([sys.executable, str(REPO / "scripts" / "d1_migrate.py"), "apply-local", "--db", str(db)], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        p = subprocess.Popen(["node", str(REPO / "dev" / "worker_local.mjs"), "--port", str(port), "--db", str(db), "--vars", str(vars_)],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        cli_env = dict(env, AGENT_TOKEN=self.TOKEN, WW_API_BASE=f"http://127.0.0.1:{port}")
+
+        def cli(*args, ok=True):
+            r = subprocess.run([sys.executable, str(REPO / "scripts" / "ww_remote.py"), *args], capture_output=True, text=True, env=cli_env, timeout=60)
+            self.assertNotIn(self.TOKEN, r.stdout + r.stderr, "el token nunca se imprime")
+            if ok:
+                self.assertEqual(r.returncode, 0, r.stderr)
+                return json.loads(r.stdout)
+            self.assertNotEqual(r.returncode, 0)
+            return r.stderr
+        try:
+            for _ in range(100):
+                try:
+                    socket.create_connection(("127.0.0.1", port), timeout=0.2).close(); break
+                except OSError:
+                    time.sleep(0.1)
+            self.assertTrue(cli("ping")["ok"])
+            n0 = len(cli("leads")["leads"])
+            ids = []
+            for f in sorted((root / "data" / "staging").glob("*/*.json")):
+                res = cli("submit", str(f.relative_to(root)))["resultado"]
+                ids.append(res)
+            ready = [x for x in ids if x["listo_para_registrar"]]
+            self.assertTrue(ready, ids)
+            reg = cli("register", ready[0]["id"])["resultado"]["registrado"]
+            self.assertEqual(len(cli("leads")["leads"]), n0 + 1)
+            draft = root / "data" / "outreach" / f"{reg}-inicial.md"
+            draft.write_text("---\nestado: mensaje_borrador\n---\nHola, prueba.\n", encoding="utf-8")
+            self.assertIn("guardado", cli("draft", reg, str(draft.relative_to(root)))["resultado"])
+            cli("update", reg, "--set", "estado_pipeline=mensaje_borrador")
+            cli("update", reg, "--set", "estado_pipeline=pendiente_aprobacion", "--set", "aprobacion_estado=pendiente")
+            self.assertIn("HTTP", cli("update", reg, "--set", "estado_pipeline=aprobado", ok=False))
+            self.assertIn("Solo se suben", cli("draft", reg, "/etc/hosts", ok=False))
+            lead = cli("lead", reg)["lead"]
+            self.assertEqual((lead["estado_pipeline"], lead["aprobacion_estado"]), ("pendiente_aprobacion", "pendiente"))
+            bad_env = dict(cli_env, WW_API_BASE="https://ejemplo.com")
+            r = subprocess.run([sys.executable, str(REPO / "scripts" / "ww_remote.py"), "ping"], capture_output=True, text=True, env=bad_env)
+            self.assertIn("Host no permitido", r.stderr)
+        finally:
+            p.terminate(); p.wait(5)
+            for s in (p.stdout, p.stderr):
+                s.close()
+            shutil.rmtree(tmp, ignore_errors=True); shutil.rmtree(root, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -33,7 +33,8 @@ function intStmt(env, id, leadId, tipo, resumen, actor, extra = {}) {
   return q(env, `INSERT INTO interactions (${HEADERS.interaccion.join(",")}) VALUES (${HEADERS.interaccion.map(() => "?").join(",")})`, ...HEADERS.interaccion.map((k) => row[k]));
 }
 
-export async function updateLead(env, leadId, changes, actor, nota = "", approverName = null) {
+const QUAL_FIELDS = ["puntaje_icp", "puntaje_oportunidad", "puntaje_contacto", "puntaje_capacidad", "puntaje_total", "clasificacion", "senales_oportunidad"];
+export async function updateLead(env, leadId, changes, actor, nota = "", approverName = null, _opts = {}) {
   const L = await getLead(env, leadId);
   await assertNotBlocked(env, L, "modificar");
   const bad = Object.keys(changes).filter((k) => !HEADERS.lead.includes(k) || READ_ONLY.has(k));
@@ -60,6 +61,13 @@ export async function updateLead(env, leadId, changes, actor, nota = "", approve
     M.proximo_seguimiento = ""; M.proxima_accion = "";
     stmts.push(q(env, `UPDATE followups SET estado='cancelado', completado_en=?, notas=trim(notas || ' | cancelado: lead pasó a ' || ?, ' |')
       WHERE lead_id=? AND estado NOT IN ('enviado','cancelado')`, nowIso(), nw, leadId));
+  }
+  if (QUAL_FIELDS.some((k) => k in changes)) {  // recalificación: misma coherencia que crm_tool.py (suma, catálogo y x-clasificacion)
+    const senales = String(M.senales_oportunidad || "").split(";").filter(Boolean);
+    const cal = { puntaje_icp: +M.puntaje_icp, puntaje_oportunidad: +M.puntaje_oportunidad, puntaje_contacto: +M.puntaje_contacto,
+      puntaje_capacidad: +M.puntaje_capacidad, puntaje_total: +M.puntaje_total, clasificacion: M.clasificacion, senales_oportunidad: senales };
+    const q2 = checkQualification(cal, senales.map((s) => ({ senal: s, confianza: "media" })), []);
+    if (q2.length) throw new CRMError("Recalificación incoherente:\n - " + q2.join("\n - "));
   }
   if (nota) M.notas = `${M.notas ? M.notas + " | " : ""}${todayIso()} ${String(nota).slice(0, 500)}`;
   M.fecha_actualizacion = nowIso();
@@ -293,6 +301,40 @@ export async function rejectCandidate(env, cid, motivo, actor) {
   if (c.request_id) stmts.push(q(env, "UPDATE research_requests SET en_revision=MAX(en_revision-1,0), descartados=descartados+1, actualizado_en=? WHERE id=?", ts, c.request_id));
   await tx(env, stmts);
   return { rechazado: cid, motivo };
+}
+
+// ------------------------------------------------------------------ agente (scripts/ww_remote.py con AGENT_TOKEN)
+export async function submitAgentCandidate(env, b, actor) {
+  const cand = b.candidato;
+  if (!cand || typeof cand !== "object" || Array.isArray(cand)) throw new CRMError("Falta el objeto «candidato».");
+  if (String(cand.nombre_negocio || "").trim().length < 2) throw new CRMError("candidato.nombre_negocio es obligatorio.");
+  const data = JSON.stringify(cand);
+  if (data.length > 200000) throw new CRMError("Candidato demasiado grande.");
+  const dossier = String(b.dossier || "").slice(0, 200000), ts = nowIso(), today = todayIso();
+  let id = String(b.id || "").trim();
+  if (id) {
+    const c = await first(env, "SELECT estado FROM candidates WHERE id=?", id);
+    if (!c) throw new CRMError("Candidato no encontrado.", 404);
+    if (c.estado !== "revision") throw new CRMError(`El candidato ya está ${c.estado}: no se modifica.`);
+    await tx(env, [q(env, "UPDATE candidates SET data=?, dossier=CASE WHEN ?<>'' THEN ? ELSE dossier END, actualizado_en=? WHERE id=?", data, dossier, dossier, ts, id),
+      auditStmt(env, "candidato.actualizado", actor, id, { nombre: cand.nombre_negocio })]);
+  } else {
+    id = `agente-${today.replaceAll("-", "")}-${crypto.randomUUID().slice(0, 8)}`;
+    await tx(env, [q(env, "INSERT INTO candidates (id,lote,data,dossier,estado,creado_en,actualizado_en) VALUES (?,?,?,?, 'revision', ?, ?)",
+      id, String(b.lote || `agente-${today}`).slice(0, 80), data, dossier, ts, ts), auditStmt(env, "candidato.subido", actor, id, { nombre: cand.nombre_negocio })]);
+  }
+  const c = await first(env, "SELECT * FROM candidates WHERE id=?", id);
+  const leads = await all(env, "SELECT * FROM leads"), supp = await all(env, "SELECT tipo, valor FROM suppression");
+  const chk = await candidateChecks(env, c, leads, supp);
+  return { id, listo_para_registrar: chk.ok, errores: chk.errs, duplicados: chk.dup.exact.map((x) => x[0]), posibles_duplicados: chk.dup.possible.map((x) => x[0]),
+    en_lista_de_exclusion: chk.hits.length > 0 };
+}
+export async function saveLeadDoc(env, leadId, kind, content, actor) {
+  await getLead(env, leadId);
+  if (kind === "evidencia") { try { JSON.parse(content); } catch { throw new CRMError("La evidencia debe ser JSON válido."); } }
+  const path = kind === "dossier" ? `data/research/${leadId}.md` : `data/research/${leadId}.evidence.json`;
+  await tx(env, [await docStmt(env, path, kind, leadId, content, actor), auditStmt(env, "documento.actualizado", actor, leadId, { path })]);
+  return { guardado: path };
 }
 
 export async function saveDraft(env, leadId, content, actor) {

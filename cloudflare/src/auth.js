@@ -90,6 +90,7 @@ export async function machineScope(env, req) {
   const t = h.startsWith("Bearer ") ? h.slice(7) : req.headers.get("X-WW-Events-Token") || "";
   if (!t) return null;
   if (env.WORKER_TOKEN && (await safeEqual(t, env.WORKER_TOKEN))) return "worker";
+  if (env.AGENT_TOKEN && (await safeEqual(t, env.AGENT_TOKEN))) return "agente";  // Claude (scripts/ww_remote.py): investiga, registra y redacta; nunca aprueba ni envía
   if (env.N8N_TOKEN && (await safeEqual(t, env.N8N_TOKEN))) return "n8n";
   if (env.EVENTS_TOKEN && (await safeEqual(t, env.EVENTS_TOKEN))) return "events";
   return null;

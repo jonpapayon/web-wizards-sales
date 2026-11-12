@@ -190,3 +190,45 @@ test("alta manual e importación CSV: candidatos por investigar, sin duplicados 
   if (supp) assert.ok(!(await env.DB.prepare("SELECT data FROM candidates WHERE lote LIKE 'csv-%'").all()).results.some((x) => x.data.includes(supp.valor)), "el dato excluido no se guarda");
   assert.equal((await s.post("/api/candidates", { rows: Array.from({ length: 101 }, () => rows[0]) })).status, 422);
 });
+
+test("agente (AGENT_TOKEN): sube y registra candidatos, redacta y recalifica; nunca aprueba, envía, da de baja ni lee exclusiones", async () => {
+  const AG = "tok-agente-0123456789abcdef";
+  const { call, env } = await setup({ seed: "demo", extraVars: { AGENT_TOKEN: AG } });
+  const H = { Authorization: `Bearer ${AG}`, "Content-Type": "application/json" };
+  const get = (p) => call(p, { headers: H });
+  const post = (p, b) => call(p, { method: "POST", headers: H, body: JSON.stringify(b) });
+  // lectura limitada
+  const ls = await get("/api/agent/leads");
+  assert.equal(ls.status, 200);
+  assert.ok(ls.body.leads.length > 0 && !("notas" in ls.body.leads[0]) && !("evidencias" in ls.body.leads[0]));
+  for (const p of ["/api/export/suppression.csv", "/api/leads", "/api/summary", "/api/events?limit=5"]) assert.notEqual((await get(p)).status, 200, p);
+  // candidato calificado del demo → reenviado por el agente → registrado
+  const cands = (await env.DB.prepare("SELECT * FROM candidates WHERE estado='revision' AND data LIKE '%calificacion%'").all()).results;
+  let up = null, bad = null;
+  for (const c0 of cands) {
+    const r = await post("/api/agent/candidates", { candidato: JSON.parse(c0.data), dossier: c0.dossier || "# dossier" });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    if (r.body.resultado.listo_para_registrar && !up) up = r; else if (!r.body.resultado.listo_para_registrar) bad = r;
+  }
+  assert.ok(up, "el demo tiene al menos un candidato listo para registrar");
+  if (bad) assert.notEqual((await post(`/api/agent/candidates/${bad.body.resultado.id}/register`, {})).status, 200, "uno incoherente no se registra");
+  const reg = await post(`/api/agent/candidates/${up.body.resultado.id}/register`, {});
+  assert.equal(reg.status, 200, JSON.stringify(reg.body));
+  const leadId = reg.body.resultado.registrado;
+  // borrador y paso a pendiente de aprobación
+  assert.equal((await post(`/api/agent/leads/${leadId}/draft`, { content: "---\nestado: mensaje_borrador\n---\nHola" })).status, 200);
+  assert.equal((await post(`/api/agent/leads/${leadId}/update`, { set: { estado_pipeline: "mensaje_borrador" } })).status, 200);
+  assert.equal((await post(`/api/agent/leads/${leadId}/update`, { set: { estado_pipeline: "pendiente_aprobacion", aprobacion_estado: "pendiente" } })).status, 200);
+  // prohibido: aprobar, tocar la baja, clasificación incoherente, rutas de sesión
+  assert.notEqual((await post(`/api/agent/leads/${leadId}/update`, { set: { estado_pipeline: "aprobado" } })).status, 200);
+  assert.notEqual((await post(`/api/agent/leads/${leadId}/update`, { set: { aprobacion_estado: "aprobado", aprobado_por: "Ana" } })).status, 200);
+  assert.notEqual((await post(`/api/agent/leads/${leadId}/update`, { set: { opt_out: "true" } })).status, 200);
+  assert.notEqual((await post(`/api/agent/leads/${leadId}/update`, { set: { clasificacion: "A" } })).status, 200);
+  assert.equal((await post(`/api/leads/${leadId}/approve`, {})).status, 403);
+  assert.equal((await post(`/api/leads/${leadId}/optout`, { fuente: "x" })).status, 403);
+  assert.equal((await post(`/api/leads/${leadId}/interaction`, { direccion: "saliente", tipo: "mensaje_inicial", canal: "email", resumen: "x" })).status, 403);
+  const L = await env.DB.prepare("SELECT estado_pipeline, aprobacion_estado, opt_out FROM leads WHERE lead_id=?").bind(leadId).first();
+  assert.deepEqual([L.estado_pipeline, L.aprobacion_estado, L.opt_out], ["pendiente_aprobacion", "pendiente", "false"]);
+  const ints = (await env.DB.prepare("SELECT direccion FROM interactions WHERE lead_id=?").bind(leadId).all()).results;
+  assert.ok(!ints.some((i) => i.direccion === "saliente"), "el agente nunca genera interacciones salientes");
+});
