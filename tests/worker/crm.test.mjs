@@ -253,3 +253,18 @@ test("rúbrica v2 en el Worker: el agente recalifica con criterios coherentes; c
   const after = await env.DB.prepare("SELECT criterios, clasificacion, puntaje_total FROM leads WHERE lead_id=?").bind(L.lead_id).first();
   assert.deepEqual([JSON.parse(after.criterios), after.clasificacion, after.puntaje_total], [crit, cls, total]);
 });
+
+test("editar un lead ya aprobado (próxima acción, recalificación) no exige ni repite la aprobación", async () => {
+  const AG = "tok-agente-0123456789abcdef";
+  const { call, env } = await setup({ seed: "demo", extraVars: { AGENT_TOKEN: AG } });
+  const s = await loginAs(call);
+  const L = await env.DB.prepare("SELECT * FROM leads WHERE aprobacion_estado='aprobado' AND opt_out='false' LIMIT 1").first();
+  assert.ok(L, "el demo tiene un lead aprobado");
+  const r = await s.post(`/api/leads/${L.lead_id}/next`, { proxima_accion: "Enviar el mensaje aprobado", proximo_seguimiento: "2026-11-18" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  const a = await call(`/api/agent/leads/${L.lead_id}/update`, { method: "POST", headers: { Authorization: `Bearer ${AG}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ set: { notas: "nota del agente" } }) });
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  const after = await env.DB.prepare("SELECT aprobado_por, fecha_aprobacion FROM leads WHERE lead_id=?").bind(L.lead_id).first();
+  assert.deepEqual([after.aprobado_por, after.fecha_aprobacion], [L.aprobado_por, L.fecha_aprobacion]);
+});

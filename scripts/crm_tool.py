@@ -762,7 +762,8 @@ def cmd_update_lead(schema, a):
                 raise CRMError("A no_contactar solo se llega con 'crm_tool.py suppress'.")
             if new not in schema["x-transiciones"].get(old, []):
                 raise CRMError(f"Transición inválida {old} → {new}. Válidas: {schema['x-transiciones'].get(old)}")
-        if changes.get("aprobacion_estado") == "aprobado" or new == "aprobado":
+        # solo al APROBAR (pasar a aprobado); editar un lead ya aprobado no es una nueva aprobación ni cambia su fecha
+        if (changes.get("aprobacion_estado") == "aprobado" and L.get("aprobacion_estado") != "aprobado") or (new == "aprobado" and old != "aprobado"):
             por = changes.get("aprobado_por", L.get("aprobado_por", "")).strip()
             if not por or por.lower() in AGENT_NAMES:
                 raise CRMError("'aprobado' exige aprobado_por con el nombre de la persona que aprobó (nunca un agente).")

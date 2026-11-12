@@ -45,7 +45,8 @@ export async function updateLead(env, leadId, changes, actor, nota = "", approve
     if (nw === "no_contactar") throw new CRMError("A no_contactar solo se llega registrando una baja.");
     if (!(TRANSITIONS[old] || []).includes(nw)) throw new CRMError(`Transición inválida ${old} → ${nw}. Válidas: ${(TRANSITIONS[old] || []).join(", ") || "ninguna"}`);
   }
-  if (changes.aprobacion_estado === "aprobado" || nw === "aprobado") {
+  // solo al APROBAR (pasar a aprobado); editar un lead que ya estaba aprobado no es una nueva aprobación
+  if ((changes.aprobacion_estado === "aprobado" && L.aprobacion_estado !== "aprobado") || (nw === "aprobado" && old !== "aprobado")) {
     const por = String(approverName ?? changes.aprobado_por ?? "").trim();
     if (!por || AGENT_NAMES.has(por.toLowerCase())) throw new CRMError("«aprobado» exige el nombre de la persona que aprueba (nunca un agente o integración).");
     if (!["pendiente", "aprobado"].includes(L.aprobacion_estado)) throw new CRMError("Solo se aprueba un lead con aprobación pendiente.");

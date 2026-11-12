@@ -141,6 +141,24 @@ class PilotIntact(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
 
 
+class EditApproved(unittest.TestCase):
+    def test_editar_un_lead_aprobado_no_es_una_nueva_aprobacion(self):
+        root = temp_root()
+        try:
+            L = next((x for x in read_csv(root, "leads") if x["aprobacion_estado"] == "aprobado" and x["opt_out"] == "false"), None)
+            if not L:
+                self.skipTest("el demo no tiene leads aprobados")
+            code, out, err = tool(root, "update-lead", L["lead_id"], "--set", "notas=nota posterior a la aprobación")
+            self.assertEqual(code, 0, out + err)
+            after = next(x for x in read_csv(root, "leads") if x["lead_id"] == L["lead_id"])
+            self.assertEqual((after["aprobado_por"], after["fecha_aprobacion"]), (L["aprobado_por"], L["fecha_aprobacion"]))
+            n = sum(1 for i in read_csv(root, "interactions") if i["lead_id"] == L["lead_id"] and i["tipo"] == "aprobacion")
+            n0 = sum(1 for i in read_csv(temp_root(), "interactions") if i["lead_id"] == L["lead_id"] and i["tipo"] == "aprobacion")
+            self.assertEqual(n, n0, "no se registra otra aprobación")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+
 class RubricaV2(unittest.TestCase):
     """Recalificación con x-rubrica-v2: bloques = suma de criterios; clase por umbrales 80/60/40; reglas de evidencia."""
 

@@ -47,7 +47,8 @@ class StaticChecks(unittest.TestCase):
         pat = re.compile(r"(sk-[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{30,}|EAA[A-Za-z0-9]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY|xox[bp]-[A-Za-z0-9-]{10,})")
         hits = []
         for f in REPO.rglob("*"):
-            if f.is_file() and ".git" not in f.parts and "backups" not in f.parts and f.suffix not in (".png", ".tgz"):
+            # .playwright-mcp/: capturas y registros temporales del navegador de verificación (no versionados; pueden traer tokens de páginas públicas)
+            if f.is_file() and ".git" not in f.parts and "backups" not in f.parts and ".playwright-mcp" not in f.parts and f.suffix not in (".png", ".tgz"):
                 try:
                     if pat.search(f.read_text(encoding="utf-8")):
                         hits.append(str(f.relative_to(REPO)))
