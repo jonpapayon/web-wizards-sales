@@ -114,11 +114,11 @@ Una regla escrita no es una restricción técnica: lo que realmente se bloquea, 
 - Teléfonos: texto literal en `telefono_publico`; E.164 (`+52` + 10 dígitos) en `telefono_e164` solo si el número publicado está completo.
 - IDs (`WW-`, `INT-`, `FU-`) los asigna `crm_tool.py`.
 
-## Arquitectura de producción (desplegada en prueba, dominio sin conectar)
+## Arquitectura de producción (en producción desde 2026-11-11)
 
 - `cloudflare/` Worker (API + dashboard), `cloudflare/migrations/` esquema D1, `wrangler.toml`. Estado, pasos y lecciones: `docs/DESPLIEGUE.md`. Nunca ejecutar `wrangler` (bloqueado): los comandos los corre una persona.
-- Desplegado el 2026-11-11 en `https://ww-sales.whyjonpapayon.workers.dev` (temporal) con D1 `ww-sales` (WNAM). `sales.webwizards.click` **no** está conectado; conectarlo (y tocar DNS) requiere autorización expresa.
-- Temporal en `wrangler.toml`: `workers_dev = true` y el host workers.dev en `ALLOWED_HOSTS`. Se revierten al conectar el dominio; hasta entonces falla a propósito una prueba de `tests/worker/n8n_security.test.mjs`.
+- CRM en `https://sales.webwizards.click` (Worker, dominio personalizado) con D1 `ww-sales` (WNAM); `workers_dev = false`. La landing `webwizards.click`/`www` es otro proyecto (Next.js en Vercel, repo `web-wizards-v2`): no se toca desde aquí.
+- DNS de `webwizards.click` en Cloudflare (dominio registrado en Namecheap). Cualquier cambio DNS, de dominio o de ruta requiere autorización expresa; la prueba de `tests/worker/n8n_security.test.mjs` solo admite la ruta `sales.webwizards.click`.
 - D1 limita `LIKE`/`GLOB` a 50 caracteres: toda migración nueva debe pasar `tests/test_migration.py › D1Compat`. La CSP del Worker bloquea atributos `style`: en `app/static/` usar `el.style`, nunca `setAttribute("style")` ni estilos en línea.
 - `dev/` ejecuta el Worker en local con D1 emulado: `bin/ww dev`. `data/d1/` y `cloudflare/seed/` contienen datos del CRM: no se editan a mano.
 - `research/investigator.py` (Mac, Playwright solo lectura), `cloudflare/src/denue.js` (INEGI), `integrations/n8n/` (7 workflows).
@@ -126,7 +126,7 @@ Una regla escrita no es una restricción técnica: lo que realmente se bloquea, 
 
 ## Fase actual
 
-Etapas 1 y 2 del `ROADMAP.md` completadas: CRM validado y dashboard local (`python3 app/server.py`, http://127.0.0.1:8765, o `bin/ww dev`, http://127.0.0.1:8787). Worker y D1 desplegados en Cloudflare en modo de prueba (ver arriba). Sin integraciones externas conectadas ni envíos.
+Etapas 1 y 2 del `ROADMAP.md` completadas: CRM validado y dashboard local (`python3 app/server.py`, http://127.0.0.1:8765, o `bin/ww dev`, http://127.0.0.1:8787). CRM en producción en Cloudflare (ver arriba). Sin integraciones externas conectadas ni envíos.
 
 Reglas para trabajar en el sistema:
 - Remitente por defecto en borradores: "equipo comercial de Web Wizards". Nunca afirmar experiencia o clientes previos no demostrados.

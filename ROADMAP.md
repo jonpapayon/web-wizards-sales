@@ -6,12 +6,12 @@ CRM con escritura validada (`crm_tool.py`), protecciones técnicas, pruebas, pil
 ## Etapa 2 · Dashboard conectado al CRM — ✅
 Dashboard completo (8 secciones + Prospección), modo demo separado, API sin endpoints de envío.
 
-## Etapa 2b · Arquitectura de producción — ✅ desplegada en prueba (2026-11-11) · ⛔ dominio pendiente de autorización
+## Etapa 2b · Arquitectura de producción — ✅ en producción en `sales.webwizards.click` (2026-11-11)
 - Worker de Cloudflare (API + dashboard protegido), D1 con reglas en la base (triggers y restricciones), autenticación con sesiones, CSRF, límites de frecuencia, Cloudflare Access opcional.
 - Migración CSV → D1 reversible y reconciliada (`scripts/d1_migrate.py`).
-- Hecho: D1 `ww-sales` (WNAM) con migraciones 0001–0003 y los 4 prospectos del piloto; Worker en `https://ww-sales.whyjonpapayon.workers.dev` (temporal); secreto `AUTH_USERS` cargado; `/api/health` 200 y rutas sin sesión 401 verificados.
+- Hecho: D1 `ww-sales` (WNAM) con migraciones 0001–0003 y los 4 prospectos del piloto; zona DNS activa en Cloudflare (landing sigue en Vercel); Worker en `https://sales.webwizards.click` con workers.dev apagado; secreto `AUTH_USERS` cargado; `/api/health` 200 y rutas sin sesión 401 verificados.
 - Corregido en el despliegue: patrones `LIKE`/`GLOB` incompatibles con D1 (migración 0003) y estilos bloqueados por la CSP en el dashboard.
-- Pendiente de ti: confirmar con sesión que el dashboard muestra gráficas y los 4 prospectos; autorizar el dominio `sales.webwizards.click` (revierte `workers_dev` y `ALLOWED_HOSTS` temporales); opcional: Cloudflare Access y `WORKER_TOKEN` (docs/DESPLIEGUE.md).
+- Pendiente de ti: confirmar con sesión que el dashboard muestra gráficas y los 4 prospectos; Email Routing para `contacto@webwizards.click` + DMARC; desactivar Web Analytics en `sales`; recomendado: Cloudflare Access; opcional: `WORKER_TOKEN` (docs/DESPLIEGUE.md).
 
 ## Etapa 3 · Investigación comercial ampliada — 🟡 implementada, falta conectar
 - Conector DENUE (INEGI) con caché y paginación → falta `DENUE_TOKEN`.

@@ -3,7 +3,7 @@
 name = "ww-sales"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
-workers_dev = true           # TEMPORAL (autorizado 2026-11-11) para probar en *.workers.dev; volver a false al conectar sales.webwizards.click
+workers_dev = false          # sin subdominio público *.workers.dev (producción en sales.webwizards.click desde 2026-11-11)
 preview_urls = false
 
 # Dashboard servido por el mismo Worker (sucesor recomendado de Pages). run_worker_first = true:
@@ -33,7 +33,7 @@ namespace_id = "4815"
 crons = ["0 13 * * *"]
 
 [vars]
-ALLOWED_HOSTS = "sales.webwizards.click,ww-sales.whyjonpapayon.workers.dev"   # quitar el host workers.dev al conectar el dominio
+ALLOWED_HOSTS = "sales.webwizards.click"
 WW_ENTORNO = "real"
 COOKIE_SECURE = "true"
 

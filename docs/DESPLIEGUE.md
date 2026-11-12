@@ -8,15 +8,11 @@ Arquitectura: un Worker (`cloudflare/src/`) que sirve la API y el dashboard (Wor
 |---|---|
 | Cuenta | `8e4896ac9309fad8549f56a181ba267c` |
 | D1 `ww-sales` | Creada, región **WNAM**, `database_id = 5d9a0e11-a098-48ec-ad8c-0bf8a5f3608b`. Migraciones 0001–0003 aplicadas; seed cargado (4 leads, 6 interacciones, 0 bajas). |
-| Worker `ww-sales` | Desplegado en **https://ww-sales.whyjonpapayon.workers.dev** (temporal). |
+| Worker `ww-sales` | **Producción en https://sales.webwizards.click** (dominio personalizado). `workers_dev = false`: la dirección workers.dev responde 404. |
+| Zona DNS `webwizards.click` | **Active en Cloudflare** (nameservers `asa`/`kobe.ns.cloudflare.com` puestos en Namecheap, donde sigue registrado el dominio). `@` y `www` en DNS only hacia Vercel (landing). |
 | Secretos | `AUTH_USERS` cargado. Faltan `WORKER_TOKEN` (solo investigador), `N8N_TOKEN`, `EVENTS_TOKEN`, `DENUE_TOKEN`, `CF_ACCESS_*` (opcionales). |
-| Dominio `sales.webwizards.click` | **No conectado.** Sin cambios de DNS. |
-
-Mientras dure la prueba en workers.dev, `wrangler.toml` tiene dos cambios temporales que se revierten al conectar el dominio (ver «Conectar el dominio»):
-- `workers_dev = true`
-- `ALLOWED_HOSTS` incluye `ww-sales.whyjonpapayon.workers.dev`
-
-La prueba `tests/worker/n8n_security.test.mjs` (exige `workers_dev = false`) falla a propósito mientras tanto: es el recordatorio de revertir.
+| Correo | Pendiente: Cloudflare Email Routing para `contacto@webwizards.click` (sustituye los 5 MX `eforward*` y el SPF de Namecheap) + DMARC `p=none`. |
+| Pendientes | Desactivar Cloudflare Web Analytics para `sales` (la CSP bloquea su script; el CRM no debe llevar analítica). Recomendado: Cloudflare Access. |
 
 ## Local primero
 ```bash
@@ -43,11 +39,12 @@ Todos los comandos desde `cloudflare/`.
    - **No despliegues con el `database_id` de ejemplo:** Wrangler puede aprovisionar recursos por su cuenta.
    - Con `workers_dev = false` y sin rutas, el Worker queda sin URL pública. Para probar en `*.workers.dev`, activa `workers_dev = true` y añade el host a `ALLOWED_HOSTS` (si no, el Worker rechaza esas peticiones).
 
-## Conectar el dominio (solo con autorización expresa)
-1. En `wrangler.toml`: `workers_dev = false`, quita el host workers.dev de `ALLOWED_HOSTS` y descomenta `[[routes]] pattern = "sales.webwizards.click"`.
-2. Actualiza la prueba de `tests/worker/n8n_security.test.mjs` que exige las rutas comentadas, con autorización (es una protección).
-3. `npx wrangler deploy` — Cloudflare crea el registro DNS en la zona `webwizards.click`.
-4. Recomendado: Cloudflare Access (Zero Trust, gratis hasta 50 usuarios) delante del dominio; define `CF_ACCESS_TEAM_DOMAIN` y `CF_ACCESS_AUD` y el Worker validará el JWT. También puede activarse para workers.dev desde el panel durante la prueba.
+## Dominio (hecho el 2026-11-11)
+1. Zona `webwizards.click` activa en Cloudflare: registros de Vercel (`@`, `www`) en **DNS only** antes de cambiar los nameservers en Namecheap; sin DNSSEC durante la transición.
+2. `[[routes]] pattern = "sales.webwizards.click"` con `custom_domain = true`; el despliegue creó el DNS y el certificado. **Solo se puede desplegar con la zona Active.**
+3. `tests/worker/n8n_security.test.mjs` exige `workers_dev = false` y que la única ruta sea `sales.webwizards.click`: otro dominio requiere nueva autorización.
+4. Recomendado: Cloudflare Access (Zero Trust, gratis hasta 50 usuarios) delante del dominio; define `CF_ACCESS_TEAM_DOMAIN` y `CF_ACCESS_AUD` y el Worker validará el JWT.
+5. Más adelante: activar DNSSEC en Cloudflare y publicar el DS en Namecheap.
 
 ## Verificación tras desplegar
 - `GET /api/health` → `200 {"ok":true,"version":…,"servicio":"ww-sales"}`.
@@ -60,6 +57,7 @@ Todos los comandos desde `cloudflare/`.
 - **La CSP del Worker (`style-src 'self'`) bloquea los atributos `style`.** El dashboard aplicaba estilos con `setAttribute("style")` y las gráficas se rompían solo en Cloudflare (el servidor Python local usa otra CSP). `app/static/app.js` usa ahora `el.style.cssText`, que la CSP permite. No relajar la CSP; revisar la consola en Cloudflare tras cada cambio de interfaz.
 - `cloudflare/package.json` tiene `"deploy": "bash ./deploy.sh"`, pero `deploy.sh` no existe: usa `npx wrangler deploy`.
 - `npx wrangler` no tiene versión fijada (desplegado con 4.160.1).
+- Al activar la zona, Cloudflare Web Analytics inyecta `static.cloudflareinsights.com/beacon.min.js`; la CSP lo bloquea (correcto). Se desactiva en el panel para `sales`, no se relaja la CSP.
 
 ## Rollback
 - Código: `npx wrangler rollback` (versión anterior) o `npx wrangler rollback <VERSION_ID>`.
