@@ -192,6 +192,7 @@ async function postRoutes(env, path, b, s, actor) {
     numero_seguimiento: parseInt(b.numero_seguimiento, 10), canal: str(b.canal, 30), plantilla_id: str(b.plantilla_id, 40), borrador_ref: str(b.borrador_ref, 120), notas: str(b.notas, 300) }, actor);
   m = path.match(/^\/api\/followups\/(FU-\d{8}-\d{4})\/status$/);
   if (m) return crm.followupStatus(env, m[1], str(b.estado, 30), str(b.nota, 300), actor);
+  if (path === "/api/candidates") return crm.importCandidates(env, b.rows, actor, b.origen === "csv" ? "csv" : "manual");
   if (path === "/api/review/register") return crm.registerCandidate(env, str(b.archivo, 200), actor, b.sucursal_de ? str(b.sucursal_de, 20) : null);
   if (path === "/api/review/reject") return crm.rejectCandidate(env, str(b.archivo, 200), str(b.motivo, 300), actor);
   if (path === "/api/prospecting") return engine.createRequest(env, b, actor);

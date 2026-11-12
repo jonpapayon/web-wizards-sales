@@ -27,7 +27,7 @@ class APITests(unittest.TestCase):
         self.assertEqual(d["lead"]["nombre_negocio"], "DEMO Clínica Dental Sonrisa Ficticia")
         self.assertTrue(d["dossier"] and d["evidencia"] and d["borradores"])
         s, d = self.srv.get("/api/research")
-        self.assertEqual(len(d["revision"]), 2)
+        self.assertEqual(len([x for x in d["revision"] if not re.search(r"/(csv|manual)-", x["archivo"])]), 2)  # los del demo
 
     def test_security_headers_and_static(self):
         s, body, h = self.srv.request("GET", "/")
@@ -72,6 +72,27 @@ class APITests(unittest.TestCase):
         self.assertEqual(s, 200, d)
         L = next(x for x in read_csv(self.root, "leads") if x["lead_id"] == lid)
         self.assertEqual((L["estado_pipeline"], L["motivo_perdida"], L["proxima_accion"]), ("perdido", "sin_respuesta", ""))
+
+    def test_alta_manual_e_importacion_csv(self):
+        lead = next(L for L in read_csv(self.root, "leads") if L["telefono_e164"] and L["opt_out"] == "false")
+        rows = [{"nombre_negocio": "Spa Nuevo Prueba", "nicho": "estetica_spa", "ciudad": "Zamora", "estado_mx": "Michoacán",
+                 "whatsapp_publico": "351 222 3344", "google_maps_url": "https://maps.google.com/?cid=2", "notas": "anuncia en Meta"},
+                {"nombre_negocio": "Duplicado", "nicho": "dentista", "ciudad": "X", "estado_mx": "Y", "telefono_publico": lead["telefono_e164"], "sitio_web": "https://d.invalid"},
+                {"nombre_negocio": "Sin fuente", "nicho": "dentista", "ciudad": "Zamora", "estado_mx": "Michoacán"}]
+        s, d = self.srv.post("/api/candidates", {"rows": rows, "origen": "csv", "por": "Ana Revisora"})
+        self.assertEqual(s, 200, d)
+        r = d["resultado"]
+        self.assertEqual((len(r["creados"]), [x["fila"] for x in r["duplicados"]], [x["fila"] for x in r["invalidos"]]), (1, [2], [3]))
+        path = self.root / r["creados"][0]["id"]
+        import json
+        c = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual((c["whatsapp_publico"], c["fuente_url"]), ("+523512223344", "https://maps.google.com/?cid=2"))
+        self.assertTrue(path.with_suffix(".notas.md").exists())
+        s, d = self.srv.get("/api/research")
+        cand = next(x for x in d["revision"] if x["archivo"] == r["creados"][0]["id"])
+        self.assertFalse(cand["calificado"])
+        s, d = self.srv.post("/api/candidates", {"rows": rows[:1], "origen": "manual", "por": "Ana Revisora"})
+        self.assertEqual([x["fila"] for x in d["resultado"]["duplicados"]], [1], "un segundo alta del mismo negocio se detecta contra la cola")
 
     def test_approval_requires_person_and_never_sends(self):
         lid = self.lead_id("Sonrisa")

@@ -173,6 +173,71 @@ export async function candidateChecks(env, c, leads, supp) {
   return { cand, errs, dup, hits, ok: !!cal && !errs.length && !dup.exact.length && !hits.length };
 }
 
+// ------------------------------------------------------------------ alta manual e importación CSV → candidatos "por investigar"
+// No crean leads: entran a la cola de revisión sin calificar. Se califican con evidencia y luego una persona los registra.
+export const IMPORT_FIELDS = ["nombre_negocio", "nicho", "subnicho", "ciudad", "estado_mx", "direccion", "telefono_publico", "whatsapp_publico",
+  "email_publico", "sitio_web", "google_maps_url", "instagram_url", "facebook_url", "fuente", "fuente_url", "notas"];
+const MAX_IMPORT = 100;  // por petición (límite de 64 KB); el dashboard envía el CSV en lotes
+export function mxE164(raw) {  // solo números mexicanos completos: 10 dígitos, o 52 + 10 dígitos
+  const d = String(raw || "").replace(/\D/g, "");
+  if (d.length === 10) return `+52${d}`;
+  if (d.length === 12 && d.startsWith("52")) return `+${d}`;
+  if (d.length === 13 && d.startsWith("521")) return `+52${d.slice(3)}`;
+  return "";
+}
+export function candidateFromRow(r, actor, today) {
+  const v = (k, n = 300) => String(r[k] ?? "").trim().slice(0, n);
+  const errs = [];
+  const c = { nombre_negocio: v("nombre_negocio", 160), nicho: v("nicho", 30).toLowerCase() || "otro", subnicho: v("subnicho", 60), ciudad: v("ciudad", 80),
+    estado_mx: v("estado_mx", 60), direccion: v("direccion"), telefono_publico: v("telefono_publico", 40), email_publico: v("email_publico", 120).toLowerCase(),
+    sitio_web: v("sitio_web"), google_maps_url: v("google_maps_url", 600), instagram_url: v("instagram_url"), facebook_url: v("facebook_url"),
+    fuente: v("fuente", 30).toLowerCase() || "manual", fuente_url: v("fuente_url", 600), fecha_fuente: today };
+  if (c.nombre_negocio.length < 2) errs.push("falta nombre_negocio");
+  if (!c.ciudad) errs.push("falta ciudad");
+  if (!c.estado_mx) errs.push("falta estado_mx");
+  if (!SCHEMA.$defs.nicho.enum.includes(c.nicho)) errs.push(`nicho inválido (${SCHEMA.$defs.nicho.enum.join(", ")})`);
+  if (!SCHEMA.$defs.fuente.enum.includes(c.fuente)) errs.push(`fuente inválida (${SCHEMA.$defs.fuente.enum.join(", ")})`);
+  c.fuente_url ||= c.google_maps_url || c.sitio_web || c.instagram_url || c.facebook_url;  // regla: todo dato con fuente
+  if (!/^https?:\/\//i.test(c.fuente_url)) errs.push("falta una URL de fuente (Google Maps, sitio, Instagram o Facebook)");
+  for (const k of ["sitio_web", "google_maps_url", "instagram_url", "facebook_url"]) if (c[k] && !/^https?:\/\//i.test(c[k])) errs.push(`${k} debe empezar con http`);
+  if (c.email_publico && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(c.email_publico)) errs.push("email_publico inválido");
+  const tel = mxE164(c.telefono_publico), wa = mxE164(v("whatsapp_publico", 40));
+  if (tel) c.telefono_e164 = tel;
+  if (wa) c.whatsapp_publico = wa; else if (v("whatsapp_publico")) errs.push("whatsapp_publico debe ser un número mexicano completo");
+  for (const k of Object.keys(c)) if (c[k] === "") delete c[k];
+  Object.assign(c, { evidencias: [], campos_no_encontrados: [], investigado_por: `${actor} (alta manual)`, dossier_path: "" });
+  return { c, errs, notas: v("notas", 1000) };
+}
+export async function importCandidates(env, rows, actor, origen = "manual") {
+  if (!Array.isArray(rows) || !rows.length) throw new CRMError("No hay filas para importar.");
+  if (rows.length > MAX_IMPORT) throw new CRMError(`Máximo ${MAX_IMPORT} filas por importación.`);
+  const ts = nowIso(), today = todayIso();
+  const leads = await all(env, "SELECT * FROM leads"), supp = await all(env, "SELECT tipo, valor FROM suppression");
+  const pending = (await all(env, "SELECT id, data FROM candidates WHERE estado='revision'")).map((x) => ({ lead_id: x.id, ...JSON.parse(x.data) }));
+  const out = { creados: [], duplicados: [], excluidos: 0, invalidos: [] }, stmts = [];
+  rows.forEach((r, i) => {
+    const fila = i + 1, { c, errs, notas } = candidateFromRow(r || {}, actor, today);
+    if (errs.length) return out.invalidos.push({ fila, nombre: c.nombre_negocio || "", errores: errs });
+    if (suppressedHits(c, supp).length) return out.excluidos++;  // lista de exclusión: no se guarda ni se repite el dato
+    const dup = findDuplicates(c, leads), dupC = findDuplicates(c, pending);
+    const ex = [...dup.exact.map((x) => x[0]), ...dupC.exact.map((x) => x[0])];
+    if (ex.length) return out.duplicados.push({ fila, nombre: c.nombre_negocio, de: ex });
+    const posibles = [...dup.possible, ...dupC.possible].map((x) => x[0]);
+    const id = `${origen}-${today.replaceAll("-", "")}-${crypto.randomUUID().slice(0, 8)}`;
+    const dossier = `# ${c.nombre_negocio}\n\nAlta ${origen === "csv" ? "por importación CSV" : "manual"} por ${actor} el ${today}. **Por investigar:** sin calificar ni evidencia.\n`
+      + (posibles.length ? `\nPosible duplicado (mismo nombre y ciudad): ${posibles.join(", ")}.\n` : "") + (notas ? `\n## Notas de alta\n\n${notas}\n` : "");
+    stmts.push(q(env, "INSERT INTO candidates (id,lote,data,dossier,estado,creado_en,actualizado_en) VALUES (?,?,?,?, 'revision', ?, ?)",
+      id, `${origen}-${today}`, JSON.stringify(c), dossier, ts, ts));
+    pending.push({ lead_id: id, ...c });
+    out.creados.push({ id, nombre: c.nombre_negocio, posibles_duplicados: posibles });
+  });
+  if (stmts.length) {
+    stmts.push(auditStmt(env, "candidatos.alta", actor, `${origen}-${today}`, { creados: out.creados.length, duplicados: out.duplicados.length, excluidos: out.excluidos, invalidos: out.invalidos.length }));
+    await tx(env, stmts);
+  }
+  return out;
+}
+
 export async function registerCandidate(env, cid, actor, sucursalDe = null) {
   const c = await first(env, "SELECT * FROM candidates WHERE id=?", cid);
   if (!c) throw new CRMError("Candidato no encontrado.", 404);

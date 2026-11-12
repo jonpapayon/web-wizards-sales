@@ -161,3 +161,32 @@ test("pipeline comercial: perdido exige motivo, activos exigen próxima acción,
   for (const k of ["hoy", "acciones", "sin_accion", "por_enviar", "por_aprobar", "proximos", "seguimientos"]) assert.ok(k in t, k);
   assert.ok(![...t.acciones, ...t.proximos].some((x) => x.lead_id === L.lead_id), "un lead perdido no aparece en Hoy");
 });
+
+test("alta manual e importación CSV: candidatos por investigar, sin duplicados ni excluidos", async () => {
+  const { call, env } = await setup({ seed: "demo" });
+  const s = await loginAs(call);
+  const lead = (await env.DB.prepare("SELECT * FROM leads WHERE telefono_e164 <> '' AND opt_out='false' LIMIT 1").first());
+  const supp = (await env.DB.prepare("SELECT valor FROM suppression WHERE tipo='telefono_e164' LIMIT 1").first());
+  const rows = [
+    { nombre_negocio: "Clínica Nueva Prueba", nicho: "dentista", ciudad: "Morelia", estado_mx: "Michoacán", telefono_publico: "443 111 2233", google_maps_url: "https://maps.google.com/?cid=1", notas: "vista en Maps" },
+    { nombre_negocio: "Duplicado del CRM", nicho: "dentista", ciudad: "X", estado_mx: "Y", telefono_publico: lead.telefono_e164, sitio_web: "https://dup.invalid" },
+    { nombre_negocio: "Excluido", nicho: "dentista", ciudad: "X", estado_mx: "Y", telefono_publico: supp ? supp.valor : "", sitio_web: "https://excluido.invalid" },
+    { nombre_negocio: "Sin fuente", nicho: "dentista", ciudad: "Morelia", estado_mx: "Michoacán" },
+    { nombre_negocio: "Clínica Nueva Prueba", nicho: "dentista", ciudad: "Morelia", estado_mx: "Michoacán", telefono_publico: "4431112233", sitio_web: "https://otra.invalid" },
+  ];
+  const r0 = await s.post("/api/candidates", { rows, origen: "csv" });
+  assert.equal(r0.status, 200, JSON.stringify(r0.body));
+  const r = { body: r0.body.resultado };
+  assert.equal(r.body.creados.length, 1);
+  assert.deepEqual(r.body.duplicados.map((d) => d.fila).sort(), [2, 5]);
+  assert.equal(r.body.excluidos, supp ? 1 : 0);
+  assert.deepEqual(r.body.invalidos.map((d) => d.fila), supp ? [4] : [3, 4].filter((f) => f === 4));
+  const c = await env.DB.prepare("SELECT * FROM candidates WHERE id=?").bind(r.body.creados[0].id).first();
+  const data = JSON.parse(c.data);
+  assert.deepEqual([c.estado, data.telefono_e164, data.fuente_url], ["revision", "+524431112233", "https://maps.google.com/?cid=1"]);
+  assert.ok(c.dossier.includes("vista en Maps"));
+  const rev = (await s.get("/api/research")).body.revision.find((x) => x.archivo === c.id);
+  assert.equal(rev.calificado, false); assert.equal(rev.listo_para_registrar, false);
+  if (supp) assert.ok(!(await env.DB.prepare("SELECT data FROM candidates WHERE lote LIKE 'csv-%'").all()).results.some((x) => x.data.includes(supp.valor)), "el dato excluido no se guarda");
+  assert.equal((await s.post("/api/candidates", { rows: Array.from({ length: 101 }, () => rows[0]) })).status, 422);
+});

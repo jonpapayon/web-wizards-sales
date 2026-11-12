@@ -131,7 +131,7 @@ function modal({ title, text, fields = [], confirm = "Confirmar", danger = false
       close(vals);
     } }, confirm);
     const back = h("div", { class: "modal-back", onclick: (e) => e.target === back && close(null) },
-      h("div", { class: "modal", role: "dialog", "aria-modal": "true" }, h("h2", {}, title), text ? h("p", {}, text) : null, body,
+      h("div", { class: "modal", role: "dialog", "aria-modal": "true" }, h("h2", {}, title), text ? h("p", { style: "white-space:pre-line" }, text) : null, body,
         h("div", { class: "actions" }, h("button", { class: "btn", onclick: () => close(null) }, "Cancelar"), ok)));
     document.body.append(back);
     (Object.values(inputs)[0] || ok).focus();
@@ -212,6 +212,77 @@ async function optOut(L, after) {
   try { await api(`/api/leads/${L.lead_id}/optout`, { fuente: r.fuente }); toast("Baja registrada. El prospecto no volverá a contactarse.", "ok"); after(); }
   catch (e) { toast(e.message, "bad"); }
 }
+// ---------------------------------------------------------------- alta manual e importación CSV (entran como candidatos «por investigar»)
+const IMPORT_COLS = ["nombre_negocio", "nicho", "subnicho", "ciudad", "estado_mx", "direccion", "telefono_publico", "whatsapp_publico", "email_publico",
+  "sitio_web", "google_maps_url", "instagram_url", "facebook_url", "fuente", "fuente_url", "notas"];
+const FUENTES = ["manual", "google_maps", "meta_ad_library", "sitio_web", "instagram", "facebook", "google_busqueda", "doctoralia", "directorio_otro", "referido", "evento"];
+function parseCsv(text) {  // RFC 4180: comas, comillas dobles y saltos de línea dentro de comillas
+  const rows = []; let row = [], f = "", q = false; text = text.replace(/^﻿/, "");
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"' && text[i + 1] === '"') { f += '"'; i++; } else if (c === '"') q = false; else f += c; }
+    else if (c === '"') q = true; else if (c === ",") { row.push(f); f = ""; } else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(f); rows.push(row); row = []; f = ""; } else f += c;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows.filter((r) => r.some((x) => x.trim()));
+}
+function importSummary(res) {
+  const lines = [`${res.creados.length} candidato(s) creados en Investigación → «Por investigar».`];
+  if (res.duplicados.length) lines.push(`${res.duplicados.length} duplicado(s) omitidos: ${res.duplicados.slice(0, 5).map((d) => `fila ${d.fila} (${d.nombre} = ${d.de.join(", ")})`).join("; ")}${res.duplicados.length > 5 ? "…" : ""}`);
+  if (res.excluidos) lines.push(`${res.excluidos} en lista de exclusión: no se guardaron.`);
+  if (res.invalidos.length) lines.push(`${res.invalidos.length} fila(s) con errores: ${res.invalidos.slice(0, 5).map((x) => `fila ${x.fila}: ${x.errores.join(", ")}`).join(" · ")}${res.invalidos.length > 5 ? "…" : ""}`);
+  const posibles = res.creados.filter((c) => c.posibles_duplicados?.length);
+  if (posibles.length) lines.push(`${posibles.length} con posible duplicado por nombre y ciudad: revísalos antes de registrar.`);
+  return lines;
+}
+async function newProspect() {
+  const r = await modal({ title: "Nuevo prospecto", text: "Entra a Investigación como «por investigar» (sin calificar). Solo datos públicos del negocio, con su fuente.",
+    fields: [{ name: "nombre_negocio", label: "Nombre del negocio", required: true },
+      { name: "nicho", label: "Nicho", type: "select", options: Object.entries(NICHO).map(([value, label]) => ({ value, label })) },
+      { name: "ciudad", label: "Ciudad", required: true }, { name: "estado_mx", label: "Estado", required: true },
+      { name: "telefono_publico", label: "Teléfono publicado (opcional)" }, { name: "whatsapp_publico", label: "WhatsApp publicado (opcional)" },
+      { name: "email_publico", label: "Email publicado (opcional)" }, { name: "sitio_web", label: "Sitio web (opcional)", placeholder: "https://…" },
+      { name: "google_maps_url", label: "Enlace de Google Maps (opcional)", placeholder: "https://maps.google.com/…" },
+      { name: "fuente", label: "Dónde lo encontraste", type: "select", options: FUENTES.map((x) => ({ value: x, label: x })) },
+      { name: "fuente_url", label: "URL de la fuente (si no es ninguna de las anteriores)", placeholder: "https://…" },
+      { name: "notas", label: "Notas (opcional)", type: "textarea" }], confirm: "Agregar" });
+  if (!r) return;
+  try { const res = (await api("/api/candidates", { rows: [r], origen: "manual", por: who() })).resultado;
+    if (res.creados.length) { toast("Agregado a Investigación → Por investigar.", "ok"); location.hash = "#/investigacion"; } else toast(importSummary(res).slice(1).join(" "), "bad"); }
+  catch (e) { toast(e.message, "bad"); }
+}
+function downloadTemplate() {
+  const ej = ["Clínica Ejemplo", "dentista", "ortodoncia", "Morelia", "Michoacán", "Av. Ejemplo 123", "443 000 0000", "", "", "https://ejemplo.mx", "https://maps.google.com/?cid=0", "", "", "google_maps", "", "Fila de ejemplo: bórrala"];
+  const csv = [IMPORT_COLS.join(","), ej.map((x) => (/[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x)).join(",")].join("\n") + "\n";
+  const a = h("a", { href: URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" })), download: "plantilla-prospectos.csv" });
+  document.body.append(a); a.click(); a.remove();
+}
+async function importCsv() {
+  const input = h("input", { type: "file", accept: ".csv,text/csv" });
+  input.onchange = async () => {
+    const file = input.files[0]; if (!file) return;
+    if (file.size > 2 * 1024 * 1024) return toast("Archivo demasiado grande (máximo 2 MB).", "bad");
+    const rows = parseCsv(await file.text());
+    if (rows.length < 2) return toast("El CSV no tiene filas de datos.", "bad");
+    const head = rows[0].map((x) => x.trim().toLowerCase());
+    const missing = ["nombre_negocio", "ciudad", "estado_mx"].filter((c) => !head.includes(c));
+    if (missing.length) return toast(`Faltan columnas: ${missing.join(", ")}. Descarga la plantilla.`, "bad");
+    const data = rows.slice(1).map((r) => Object.fromEntries(head.map((k, i) => [k, r[i] ?? ""]).filter(([k]) => IMPORT_COLS.includes(k))));
+    if (data.length > 1000) return toast("Máximo 1000 filas por archivo.", "bad");
+    const ok = await modal({ title: "Importar prospectos", text: `${data.length} fila(s) de «${file.name}». Entran a Investigación como «por investigar». Se omiten duplicados del CRM y de la cola, y negocios en la lista de exclusión.`, confirm: "Importar" });
+    if (!ok) return;
+    const total = { creados: [], duplicados: [], excluidos: 0, invalidos: [] };
+    try {
+      for (let i = 0; i < data.length; i += 100) {  // lotes de 100 (límite por petición)
+        const res = (await api("/api/candidates", { rows: data.slice(i, i + 100), origen: "csv", por: who() })).resultado;
+        total.creados.push(...res.creados); total.excluidos += res.excluidos;
+        total.duplicados.push(...res.duplicados.map((d) => ({ ...d, fila: d.fila + i }))); total.invalidos.push(...res.invalidos.map((d) => ({ ...d, fila: d.fila + i })));
+      }
+    } catch (e) { toast(e.message, "bad"); }
+    await modal({ title: "Resultado de la importación", text: importSummary(total).join("\n"), confirm: "Ver en Investigación" }) && (location.hash = "#/investigacion");
+  };
+  input.click();
+}
 function transitionSelect(L, transitions, after) {
   const opts = transitions.filter((t) => t !== "aprobado");
   if (!opts.length) return null;
@@ -280,7 +351,11 @@ views.prospectos = async (v, param) => {
       : [h("tr", {}, h("td", { colspan: cols.length, class: "empty" }, "Ningún prospecto coincide con los filtros."))]));
   }
   v.append(h("div", { class: "page-head" }, h("div", {}, h("h1", {}, "Prospectos"), h("p", {}, `${leads.length} registrados en el CRM.`)),
-      h("a", { class: "btn", href: "/api/export/leads.csv", download: "leads.csv" }, "Descargar CSV")),
+      h("div", { class: "row" },
+        h("button", { class: "btn primary", onclick: () => newProspect() }, "Nuevo prospecto"),
+        h("button", { class: "btn", onclick: () => importCsv() }, "Importar CSV"),
+        h("button", { class: "btn", onclick: () => downloadTemplate() }, "Plantilla CSV"),
+        h("a", { class: "btn", href: "/api/export/leads.csv", download: "leads.csv" }, "Descargar CSV"))),
     h("div", { class: "toolbar" }, h("input", { class: "input search", placeholder: "Buscar por nombre, ID, ciudad, teléfono…", oninput: (e) => { f.q = e.target.value; draw(); } }),
       sel("nicho", "Nicho", uniq("nicho"), (x) => NICHO[x] || x), sel("clase", "Clase", ["A", "B", "C", "descartado"]),
       sel("estado", "Estado", uniq("estado_pipeline"), (x) => STATE_LABEL[x] || x), sel("ciudad", "Ciudad", uniq("ciudad"))),
@@ -360,14 +435,17 @@ views.investigacion = async (v) => {
   v.append(h("div", { class: "page-head" }, h("div", {}, h("h1", {}, "Investigación"), h("p", {}, "Candidatos en revisión antes de registrarse, y evidencia de cada prospecto."))),
     h("div", { class: "card" }, h("h2", {}, `Área de revisión (${review.length})`),
       review.length ? h("div", { class: "stack" }, review.map((c) => h("div", { class: "card", style: "background:var(--surface-2)" },
-        h("div", { class: "row", style: "justify-content:space-between" }, h("div", {}, h("strong", {}, c.nombre_negocio || c.archivo), " ", c.clasificacion ? badgeClass(c.clasificacion) : h("span", { class: "badge warn" }, "sin calificar"),
+        h("div", { class: "row", style: "justify-content:space-between" }, h("div", {}, h("strong", {}, c.nombre_negocio || c.archivo), " ", c.clasificacion ? badgeClass(c.clasificacion) : h("span", { class: "badge warn" }, "por investigar"),
+          c.ciudad ? h("span", { class: "muted" }, ` · ${c.ciudad}`) : null,
           h("div", { class: "faint mono" }, c.archivo)),
           h("div", { class: "row" }, h("button", { class: "btn primary", disabled: !c.listo_para_registrar, onclick: async () => {
             const ok = await modal({ title: "Registrar en el CRM", text: `${c.nombre_negocio}: se validará de nuevo (esquema, duplicados, exclusiones, coherencia de la calificación).`, confirm: "Registrar" });
             if (!ok) return; try { const res = await api("/api/review/register", { archivo: c.archivo }); toast(`Registrado como ${res.resultado.registrado}.`, "ok"); reload(); } catch (e) { toast(e.message, "bad"); } } }, "Registrar"),
             h("button", { class: "btn", onclick: async () => { const m = await modal({ title: "Rechazar candidato", fields: [{ name: "motivo", label: "Motivo", required: true, type: "textarea" }], confirm: "Rechazar" });
               if (!m) return; try { await api("/api/review/reject", { archivo: c.archivo, motivo: m.motivo }); toast("Candidato rechazado (se conserva en rechazados/).", "ok"); reload(); } catch (e) { toast(e.message, "bad"); } } }, "Rechazar"))),
-        c.errores.length ? h("div", { class: "notice warn", style: "margin-top:10px" }, h("strong", {}, "Pendiente de revisión: "), h("ul", {}, c.errores.map((e) => h("li", {}, e)))) : null,
+        !c.calificado ? h("div", { class: "notice warn", style: "margin-top:10px" }, h("strong", {}, "Por investigar: "), "aún no tiene evidencia ni calificación. Pide a Claude que lo investigue (Google Maps, sitio, Meta Ads) y lo califique antes de registrarlo.")
+          : c.errores.length ? h("div", { class: "notice warn", style: "margin-top:10px" }, h("strong", {}, "Pendiente de revisión: "), h("ul", {}, c.errores.map((e) => h("li", {}, e)))) : null,
+        c.posibles_duplicados?.length ? h("div", { class: "notice warn", style: "margin-top:10px" }, `Posible duplicado (mismo nombre y ciudad): ${c.posibles_duplicados.map((x) => x[0]).join(", ")}`) : null,
         c.duplicados.length ? h("div", { class: "notice bad", style: "margin-top:10px" }, `Duplicado de ${c.duplicados.map((x) => x[0]).join(", ")}`) : null,
         c.suprimido.length ? h("div", { class: "notice bad", style: "margin-top:10px" }, "En lista de exclusión: no se puede registrar.") : null,
         c.evidencias.length ? h("details", { style: "margin-top:10px" }, h("summary", {}, `${c.evidencias.length} evidencias`), h("ul", {}, c.evidencias.map((e) => h("li", {}, `${e.senal}: ${e.observacion} `, confBadge(e.confianza))))) : null)))

@@ -408,7 +408,102 @@ def safe_staging(rel):
 LEAD_RE = r"(WW-\d{8}-\d{3})"
 
 
+def mx_e164(raw):  # mismas reglas que cloudflare/src/crm.js › mxE164
+    d = re.sub(r"\D", "", str(raw or ""))
+    if len(d) == 10:
+        return f"+52{d}"
+    if len(d) == 12 and d.startswith("52"):
+        return f"+{d}"
+    if len(d) == 13 and d.startswith("521"):
+        return f"+52{d[3:]}"
+    return ""
+
+
+def candidate_from_row(r, actor, today):
+    """Mismas reglas que cloudflare/src/crm.js › candidateFromRow."""
+    v = lambda k, n=300: str(r.get(k) or "").strip()[:n]
+    errs = []
+    c = {"nombre_negocio": v("nombre_negocio", 160), "nicho": v("nicho", 30).lower() or "otro", "subnicho": v("subnicho", 60),
+         "ciudad": v("ciudad", 80), "estado_mx": v("estado_mx", 60), "direccion": v("direccion"), "telefono_publico": v("telefono_publico", 40),
+         "email_publico": v("email_publico", 120).lower(), "sitio_web": v("sitio_web"), "google_maps_url": v("google_maps_url", 600),
+         "instagram_url": v("instagram_url"), "facebook_url": v("facebook_url"), "fuente": v("fuente", 30).lower() or "manual",
+         "fuente_url": v("fuente_url", 600), "fecha_fuente": today}
+    if len(c["nombre_negocio"]) < 2:
+        errs.append("falta nombre_negocio")
+    if not c["ciudad"]:
+        errs.append("falta ciudad")
+    if not c["estado_mx"]:
+        errs.append("falta estado_mx")
+    if c["nicho"] not in SCHEMA["$defs"]["nicho"]["enum"]:
+        errs.append(f"nicho inválido ({', '.join(SCHEMA['$defs']['nicho']['enum'])})")
+    if c["fuente"] not in SCHEMA["$defs"]["fuente"]["enum"]:
+        errs.append(f"fuente inválida ({', '.join(SCHEMA['$defs']['fuente']['enum'])})")
+    c["fuente_url"] = c["fuente_url"] or c["google_maps_url"] or c["sitio_web"] or c["instagram_url"] or c["facebook_url"]
+    if not re.match(r"^https?://", c["fuente_url"], re.I):
+        errs.append("falta una URL de fuente (Google Maps, sitio, Instagram o Facebook)")
+    for k in ("sitio_web", "google_maps_url", "instagram_url", "facebook_url"):
+        if c[k] and not re.match(r"^https?://", c[k], re.I):
+            errs.append(f"{k} debe empezar con http")
+    if c["email_publico"] and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", c["email_publico"]):
+        errs.append("email_publico inválido")
+    tel, wa = mx_e164(c["telefono_publico"]), mx_e164(v("whatsapp_publico", 40))
+    if tel:
+        c["telefono_e164"] = tel
+    if wa:
+        c["whatsapp_publico"] = wa
+    elif v("whatsapp_publico"):
+        errs.append("whatsapp_publico debe ser un número mexicano completo")
+    c = {k: x for k, x in c.items() if x != ""}
+    c.update({"evidencias": [], "campos_no_encontrados": [], "investigado_por": f"{actor} (alta manual)", "dossier_path": ""})
+    return c, errs, v("notas", 1000)
+
+
+def import_candidates(body):
+    rows_in, origen = body.get("rows"), ("csv" if body.get("origen") == "csv" else "manual")
+    if not isinstance(rows_in, list) or not rows_in:
+        return 422, {"ok": False, "error": "No hay filas para importar."}
+    if len(rows_in) > 100:
+        return 422, {"ok": False, "error": "Máximo 100 filas por importación."}
+    actor = actor_of(body)
+    today = datetime.now(crm.TZ).date().isoformat()
+    leads, supp = rows("leads"), rows("suppression")
+    pending = []
+    for p in sorted((ROOT / "data" / "staging").glob("*/*.json")):
+        if not p.name.startswith("_"):
+            try:
+                pending.append(dict(json.loads(p.read_text(encoding="utf-8")), lead_id=str(p.relative_to(ROOT))))
+            except ValueError:
+                pass
+    out = {"creados": [], "duplicados": [], "excluidos": 0, "invalidos": []}
+    folder = ROOT / "data" / "staging" / today
+    for i, r in enumerate(rows_in, 1):
+        c, errs, notas = candidate_from_row(r if isinstance(r, dict) else {}, actor, today)
+        if errs:
+            out["invalidos"].append({"fila": i, "nombre": c.get("nombre_negocio", ""), "errores": errs}); continue
+        if crm.suppressed_hits(c, supp):
+            out["excluidos"] += 1; continue  # lista de exclusión: no se guarda ni se repite el dato
+        ex1, pos1 = crm.find_duplicates(c, leads)
+        ex2, pos2 = crm.find_duplicates(c, pending)
+        if ex1 or ex2:
+            out["duplicados"].append({"fila": i, "nombre": c["nombre_negocio"], "de": [x[0] for x in ex1 + ex2]}); continue
+        folder.mkdir(parents=True, exist_ok=True)
+        slug = re.sub(r"[^a-z0-9]+", "-", crm.normalize_name(c["nombre_negocio"]))[:50].strip("-") or "negocio"
+        path = folder / f"{origen}-{slug}-{secrets.token_hex(3)}.json"
+        path.write_text(json.dumps(c, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if notas:
+            path.with_suffix(".notas.md").write_text(f"# Notas de alta — {c['nombre_negocio']}\n\n{notas}\n", encoding="utf-8")
+        rel = str(path.relative_to(ROOT))
+        pending.append(dict(c, lead_id=rel))
+        out["creados"].append({"id": rel, "nombre": c["nombre_negocio"], "posibles_duplicados": [x[0] for x in pos1 + pos2]})
+    if out["creados"]:
+        crm.audit("candidatos.alta", actor, f"{origen}-{today}", {"creados": len(out["creados"]), "duplicados": len(out["duplicados"]),
+                                                                  "excluidos": out["excluidos"], "invalidos": len(out["invalidos"])})
+    return 200, {"ok": True, "resultado": out}
+
+
 def post_routes(path, body):
+    if path == "/api/candidates":
+        return import_candidates(body)
     m = re.fullmatch(rf"/api/leads/{LEAD_RE}/next", path)
     if m:
         args = ["update-lead", m.group(1), *commercial_args(body)]
