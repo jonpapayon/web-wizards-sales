@@ -61,12 +61,14 @@ D1 es la fuente principal. El pipeline local (`crm_tool.py`, CSV) registra leads
 1. **Exportar D1** (lectura; lo hace una persona, desde `cloudflare/`):
    `mkdir -p ../data/exports && npx wrangler d1 export ww-sales --remote --output ../data/exports/d1-remote.sql`
 2. **Traer lo del dashboard a local** (desde la raíz): `python3 scripts/crm_tool.py pull-d1 --sql data/exports/d1-remote.sql` (primero `--dry-run`).
-   - Agrega leads, interacciones, seguimientos y bajas que solo existen en D1; actualiza leads y seguimientos que cambiaron en D1 (gana D1).
-   - **Nunca revierte una baja local** (la reporta como conflicto: hay que aplicarla en el dashboard). Interacciones y bajas son inmutables: mismo ID con contenido distinto = conflicto.
-   - Documentos editados en el dashboard (borradores) se escriben en `data/research/` o `data/outreach/`, solo si el archivo local no tenía cambios propios.
+   - Agrega leads, interacciones, seguimientos y bajas que solo existen en D1.
+   - Leads distintos: **gana el más reciente** según `fecha_actualizacion`. Si D1 es más nuevo, se trae; si local es más nuevo, se deja (lo sube el paso 3) y se lista en `local_mas_nuevo`. Misma fecha y contenido distinto = conflicto.
+   - **Nunca revierte una baja local.** Interacciones y bajas son inmutables (mismo ID con contenido distinto = conflicto). Seguimientos distintos se reportan para revisión manual (no tienen marca de tiempo).
+   - Documentos: solo trae versiones creadas en el dashboard y solo si el archivo local no cambió desde la última sincronización.
 3. **Calcular el delta** (desde la raíz): `python3 scripts/d1_migrate.py delta --remote-sql data/exports/d1-remote.sql`
-   - Emite solo `INSERT` de lo que existe en local y falta en D1 → `cloudflare/seed/delta-<fecha>.sql` (no versionado).
-   - **Conflictos** (misma clave, contenido distinto, p. ej. un lead aprobado en el dashboard): se reportan y **no** se emiten; gana D1.
+   - Emite `INSERT` de lo que existe en local y falta en D1, y `UPDATE` de los leads más recientes en local → `cloudflare/seed/delta-<fecha>.sql` (no versionado).
+   - Los `UPDATE` recorren los estados permitidos paso a paso (p. ej. `calificado → mensaje_borrador → pendiente_aprobacion`; una baja va directo a `no_contactar`) y llevan una guarda: solo aplican si en D1 el lead sigue como en la exportación. Si alguien lo editó en el dashboard después, no tocan nada.
+   - **Conflictos** (D1 más nuevo, misma fecha con contenido distinto, cambio de identidad, lead dado de baja en D1): se reportan y **no** se emiten.
    - **Solo en D1:** se reporta; después del paso 2 debe salir vacío.
    - `audit_log` no se sincroniza: cada entorno lleva su propia auditoría. Documentos con cambios entran como versión nueva.
 4. **Aplicar** (una persona, desde `cloudflare/`): `npx wrangler d1 execute ww-sales --remote --file seed/delta-<fecha>.sql`. Si D1 cambió desde la exportación, falla completo y no aplica nada: repetir desde el paso 1.

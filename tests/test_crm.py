@@ -171,7 +171,7 @@ class PullD1(unittest.TestCase):
 
     def test_dashboard_changes_come_back(self):
         L = self.open_lead()
-        self.db.execute("UPDATE leads SET notas = 'nota del dashboard' WHERE lead_id = ?", (L["lead_id"],))
+        self.db.execute("UPDATE leads SET notas = 'nota del dashboard', fecha_actualizacion = '2099-01-01T10:00:00-06:00' WHERE lead_id = ?", (L["lead_id"],))
         iid = f"INT-{self.day}-5001"  # rango del Worker
         self.db.execute("""INSERT INTO interactions (interaccion_id,lead_id,fecha_hora,canal,direccion,tipo,resumen,enviado_por,resultado,sentimiento,registrado_por)
                            VALUES (?,?,?,'interno','interna','nota','desde el dashboard','humano','n/a','n/a','dashboard:prueba')""",
@@ -192,6 +192,17 @@ class PullD1(unittest.TestCase):
         rep2 = json.loads(tool(self.root, "pull-d1", "--sql", sql)[1])
         self.assertEqual((rep2["agregar"]["interactions"], rep2["actualizar"]["leads"]), ([], []))
 
+    def test_local_newer_lead_is_not_reverted(self):
+        L = self.open_lead()
+        sql = self.dump()  # D1 con la versión vieja
+        code, out, err = tool(self.root, "update-lead", L["lead_id"], "--set", "notas=cambio local posterior")
+        self.assertEqual(code, 0, out + err)
+        code, out, err = tool(self.root, "pull-d1", "--sql", sql)
+        self.assertEqual(code, 0, err)
+        rep = json.loads(out)
+        self.assertIn(L["lead_id"], [x["clave"] for x in rep["local_mas_nuevo"]])
+        self.assertEqual(next(x for x in read_csv(self.root, "leads") if x["lead_id"] == L["lead_id"])["notas"], "cambio local posterior")
+
     def test_local_optout_is_never_reverted(self):
         L = self.open_lead()
         sql = self.dump()  # D1 sin la baja
@@ -200,9 +211,32 @@ class PullD1(unittest.TestCase):
         code, out, err = tool(self.root, "pull-d1", "--sql", sql)
         self.assertEqual(code, 0, err)
         rep = json.loads(out)
+        self.assertIn(L["lead_id"], [x["clave"] for x in rep["local_mas_nuevo"]], rep)
+        after = next(x for x in read_csv(self.root, "leads") if x["lead_id"] == L["lead_id"])
+        self.assertEqual((after["opt_out"], after["estado_pipeline"]), ("true", "no_contactar"))
+        # aunque D1 tuviera una edición más nueva del lead, la baja local no se revierte
+        self.db.execute("UPDATE leads SET notas='edición posterior en el dashboard', fecha_actualizacion='2099-01-01T10:00:00-06:00' WHERE lead_id=?", (L["lead_id"],))
+        rep = json.loads(tool(self.root, "pull-d1", "--sql", self.dump())[1])
         self.assertTrue(any(c["clave"] == L["lead_id"] and "baja local" in c["motivo"] for c in rep["conflictos"]), rep)
         after = next(x for x in read_csv(self.root, "leads") if x["lead_id"] == L["lead_id"])
         self.assertEqual((after["opt_out"], after["estado_pipeline"]), ("true", "no_contactar"))
+
+    def test_local_optout_is_pushed_to_d1(self):
+        import os, subprocess, sys
+        L = self.open_lead()
+        self.dump()
+        self.assertEqual(tool(self.root, "suppress", "--lead", L["lead_id"], "--motivo", "opt_out", "--fuente", "prueba: BAJA")[0], 0)
+        out = self.root / "delta.sql"
+        r = subprocess.run([sys.executable, str(REPO / "scripts" / "d1_migrate.py"), "delta", "--remote-db", str(self.remote), "--out", str(out)],
+                           capture_output=True, text=True, env=dict(os.environ, WW_ROOT=str(self.root)))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rep = json.loads(r.stdout)
+        self.assertEqual(rep["conflictos"], [], rep)
+        self.assertIn((L["lead_id"], ["no_contactar"]), [(u["clave"], u["pasos"]) for u in rep["actualizar"]["leads"]])
+        self.db.executescript("BEGIN;" + out.read_text(encoding="utf-8") + "COMMIT;")
+        row = self.db.execute("SELECT opt_out, estado_pipeline FROM leads WHERE lead_id=?", (L["lead_id"],)).fetchone()
+        self.assertEqual(row, ("true", "no_contactar"))
+        self.assertGreater(self.db.execute("SELECT COUNT(*) FROM suppression WHERE lead_id=?", (L["lead_id"],)).fetchone()[0], 0)
 
     def test_local_ids_stay_below_worker_range(self):
         L = self.open_lead()

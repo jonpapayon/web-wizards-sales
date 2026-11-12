@@ -40,6 +40,7 @@ case "${1:-ayuda}" in
     fi ;;
   test)           # Todas las pruebas (Python + Node)
     python3 scripts/build_worker_content.py >/dev/null
+    python3 scripts/d1_migrate.py build-seed >/dev/null   # el seed refleja siempre los CSV actuales
     python3 tests/run_all.py "${@:2}"
     node --test --test-reporter=spec tests/worker/ ;;
   migrate)        # Regenera el seed desde los CSV y reconcilia la base local

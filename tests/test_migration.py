@@ -143,16 +143,54 @@ class SyncDelta(unittest.TestCase):
         db.execute("ROLLBACK") if db.in_transaction else None
         self.assertEqual(db.execute("SELECT COUNT(*) FROM leads").fetchone()[0], csv_leads)
 
+    def test_lead_mas_nuevo_en_local_se_actualiza_con_transiciones(self):
+        remote = self.full_remote("actualiza")
+        db = sqlite3.connect(remote)
+        # D1 tiene una versión más vieja: el lead seguía 'calificado' (simula el estado antes del borrador)
+        lead = db.execute("SELECT lead_id FROM leads WHERE estado_pipeline='pendiente_aprobacion' AND opt_out='false' ORDER BY lead_id LIMIT 1").fetchone()
+        if not lead:
+            self.skipTest("el CRM no tiene leads en pendiente_aprobacion")
+        lead = lead[0]
+        db.execute("DROP TRIGGER trg_leads_transicion")  # solo para fabricar el estado viejo en la copia de prueba
+        db.execute("UPDATE leads SET estado_pipeline='calificado', aprobacion_estado='no_aplica', fecha_actualizacion='2000-01-01T00:00:00-06:00' WHERE lead_id=?", (lead,))
+        db.commit(); db.close()
+        # reponer el trigger desde las migraciones para que la carga lo respete
+        db = sqlite3.connect(remote)
+        mig = "".join(m.read_text(encoding="utf-8") for m in sorted((REPO / "cloudflare" / "migrations").glob("*.sql")))
+        trg = mig[mig.rindex("CREATE TRIGGER trg_leads_transicion"):]
+        db.executescript(trg[:trg.index("END;") + 4]); db.close()
+        rep, out = self.delta(remote, "actualiza")
+        self.assertEqual([(u["clave"], u["pasos"]) for u in rep["actualizar"]["leads"]], [(lead, ["mensaje_borrador", "pendiente_aprobacion"])])
+        db = sqlite3.connect(remote, isolation_level=None)
+        db.execute("PRAGMA foreign_keys = ON"); db.setlimit(sqlite3.SQLITE_LIMIT_LIKE_PATTERN_LENGTH, 50)
+        db.executescript("BEGIN;" + out.read_text(encoding="utf-8") + "COMMIT;")
+        self.assertEqual(db.execute("SELECT estado_pipeline FROM leads WHERE lead_id=?", (lead,)).fetchone()[0], "pendiente_aprobacion")
+        db.close()
+        self.assertEqual(self.delta(remote, "actualiza-2")[0]["total_sentencias"], 0, "converge")
+
+    def test_guarda_no_pisa_cambios_hechos_en_d1_despues_de_exportar(self):
+        remote = self.full_remote("guarda")
+        db = sqlite3.connect(remote)
+        lead = db.execute("SELECT lead_id FROM leads WHERE opt_out='false' ORDER BY lead_id LIMIT 1").fetchone()[0]
+        db.execute("UPDATE leads SET notas='vieja', fecha_actualizacion='2000-01-01T00:00:00-06:00' WHERE lead_id=?", (lead,))
+        db.commit(); db.close()
+        rep, out = self.delta(remote, "guarda")
+        self.assertIn(lead, [u["clave"] for u in rep["actualizar"]["leads"]])
+        db = sqlite3.connect(remote, isolation_level=None)
+        db.execute("UPDATE leads SET notas='editado en el dashboard', fecha_actualizacion='2099-01-01T00:00:00-06:00' WHERE lead_id=?", (lead,))
+        db.executescript("BEGIN;" + out.read_text(encoding="utf-8") + "COMMIT;")
+        self.assertEqual(db.execute("SELECT notas FROM leads WHERE lead_id=?", (lead,)).fetchone()[0], "editado en el dashboard")
+
     def test_conflicto_se_reporta_y_gana_d1(self):
         remote = self.full_remote("conflicto")
         db = sqlite3.connect(remote)
         lead = db.execute("SELECT lead_id FROM leads WHERE opt_out='false' ORDER BY lead_id LIMIT 1").fetchone()[0]
-        db.execute("UPDATE leads SET notas = notas || ' (editado en el dashboard)' WHERE lead_id = ?", (lead,))
+        db.execute("UPDATE leads SET notas = notas || ' (editado en el dashboard)', fecha_actualizacion='2099-01-01T00:00:00-06:00' WHERE lead_id = ?", (lead,))
         db.execute("INSERT INTO audit_log (ts,evento,actor,entidad,entorno,detalle) VALUES ('2099-01-01','auth.login','x','x','real','{}')")
         db.commit(); db.close()
         rep, out = self.delta(remote, "conflicto")
         self.assertEqual(rep["total_sentencias"], 0, rep)
-        self.assertEqual([(c["tabla"], c["clave"], c["campos"]) for c in rep["conflictos"]], [("leads", lead, ["notas"])])
+        self.assertEqual([(c["tabla"], c["clave"], "pull-d1" in c["motivo"]) for c in rep["conflictos"]], [("leads", lead, True)])
 
 
 class D1Compat(unittest.TestCase):

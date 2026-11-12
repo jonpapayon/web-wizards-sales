@@ -936,6 +936,14 @@ def cmd_export(schema, a):
 # ----------------------------------------------------------------------------- sincronización D1 → local
 PULL_KEYS = {"leads": ("lead_id",), "interactions": ("interaccion_id",), "followups": ("seguimiento_id",), "suppression": ("tipo", "valor")}
 PULL_DOC_DIRS = ("data/research/", "data/outreach/")
+SYNC_AUTHORS = {"migracion-csv", "sync-local"}  # versiones de documentos que vinieron del CRM local (no del dashboard)
+
+
+def _ts(s):
+    try:
+        return datetime.fromisoformat(s)
+    except (TypeError, ValueError):
+        return None
 
 
 def _d1_rows(db, table, fields):
@@ -952,7 +960,7 @@ def _sha(s):
 
 def pull_plan(schema, db):
     """Compara D1 con los CSV locales. D1 es la fuente principal, salvo que las bajas locales nunca se revierten."""
-    plan = {"agregar": {}, "actualizar": {}, "conflictos": [], "solo_local": {}, "documentos": [], "_rows": {}}
+    plan = {"agregar": {}, "actualizar": {}, "conflictos": [], "solo_local": {}, "local_mas_nuevo": [], "documentos": [], "_rows": {}}
     for kind, key in PULL_KEYS.items():
         fields, local = read_csv(kind)
         remote = _d1_rows(db, kind, fields)
@@ -965,6 +973,17 @@ def pull_plan(schema, db):
             if not difs:
                 continue
             ident = "|".join(kk)
+            if kind == "leads":  # gana el más reciente según fecha_actualizacion; lo local más nuevo lo sube `d1_migrate.py delta`
+                tl, tr = _ts(L["fecha_actualizacion"]), _ts(R["fecha_actualizacion"])
+                if tl and tr and tl > tr:
+                    plan["local_mas_nuevo"].append({"tabla": kind, "clave": ident, "campos": difs})
+                    continue
+                if not (tl and tr) or tl == tr:
+                    plan["conflictos"].append({"tabla": kind, "clave": ident, "campos": difs, "motivo": "misma fecha de actualización (o sin fecha) y contenido distinto"})
+                    continue
+            if kind == "followups":
+                plan["conflictos"].append({"tabla": kind, "clave": ident, "campos": difs, "motivo": "seguimientos sin marca de tiempo: revisar a mano"})
+                continue
             if kind in ("interactions", "suppression"):  # historial inmutable / solo anexado
                 plan["conflictos"].append({"tabla": kind, "clave": ident, "campos": difs, "motivo": "inmutable: mismo ID con contenido distinto"})
             elif kind == "leads" and (L["opt_out"] == "true" or L["estado_pipeline"] == "no_contactar") and \
@@ -988,7 +1007,7 @@ def pull_plan(schema, db):
     import sqlite3
     db.row_factory = sqlite3.Row
     latest = {}
-    for r in db.execute("SELECT path, version, content, sha256 FROM documents ORDER BY path, version"):
+    for r in db.execute("SELECT path, version, content, sha256, creado_por FROM documents ORDER BY path, version"):
         latest.setdefault(r["path"], []).append(dict(r))
     for path, versions in sorted(latest.items()):
         p = Path(path)
@@ -996,12 +1015,15 @@ def pull_plan(schema, db):
             plan["conflictos"].append({"tabla": "documents", "clave": path, "motivo": "ruta fuera de data/research o data/outreach"})
             continue
         last, dest = versions[-1], ROOT / path
+        if last["creado_por"] in SYNC_AUTHORS:
+            continue  # la última versión en D1 vino de local: el dashboard no la cambió (lo local más nuevo lo sube el delta)
         if dest.exists():
             cur = _sha(dest.read_text(encoding="utf-8"))
             if cur == last["sha256"]:
                 continue
-            if cur not in {v["sha256"] for v in versions[:-1]}:
-                plan["conflictos"].append({"tabla": "documents", "clave": path, "motivo": "editado en local y en D1"})
+            synced = [v["sha256"] for v in versions if v["creado_por"] in SYNC_AUTHORS]
+            if not synced or cur != synced[-1]:  # local cambió desde la última sincronización
+                plan["conflictos"].append({"tabla": "documents", "clave": path, "motivo": "editado en local y en el dashboard"})
                 continue
         plan["documentos"].append({"path": path, "version": last["version"], "content": last["content"]})
     return plan

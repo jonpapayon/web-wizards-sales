@@ -249,9 +249,83 @@ def _sql_insert(db, table, row):
     return f'INSERT INTO "{table}" ({",".join(row)}) VALUES ({vals});'
 
 
+LEAD_IDENTITY = ("lead_id", "fecha_registro", "fuente", "fuente_url")  # inmutables (trigger trg_leads_identidad)
+
+
+def _ts(s):
+    try:
+        return datetime.fromisoformat(str(s))
+    except (TypeError, ValueError):
+        return None
+
+
+def _path(local, a, b):
+    """Ruta más corta de estados permitidos de a → b (allowed_transitions; no_contactar solo como baja)."""
+    if a == b:
+        return []
+    if b == "no_contactar":  # la baja se permite desde cualquier estado salvo 'ganado' (trigger trg_leads_transicion)
+        return None if a == "ganado" else ["no_contactar"]
+    edges = {}
+    for d, h in local.execute("SELECT desde, hacia FROM allowed_transitions"):
+        edges.setdefault(d, []).append(h)
+    prev, queue = {a: None}, [a]
+    while queue:
+        cur = queue.pop(0)
+        for n in edges.get(cur, []):
+            if n not in prev:
+                prev[n] = cur; queue.append(n)
+    if b not in prev:
+        return None
+    steps, x = [], b
+    while x != a:
+        steps.append(x); x = prev[x]
+    return steps[::-1]
+
+
+def _lead_updates(local, lo, re_, cols, rep):
+    """Leads más recientes en local (fecha_actualizacion) → UPDATE paso a paso por transiciones permitidas."""
+    out = []
+    mutable = [c for c in cols if c not in LEAD_IDENTITY]
+    for L, R in ((lo[k], re_[k]) for k in lo.keys() & re_.keys()):
+        difs = [c for c in cols if str(L[c] or "") != str(R[c] or "")]
+        if not difs:
+            continue
+        tl, tr = _ts(L["fecha_actualizacion"]), _ts(R["fecha_actualizacion"])
+        if not (tl and tr and tl > tr):
+            continue  # D1 igual o más nuevo: lo resuelve pull-d1 (o es conflicto)
+        motivo = None
+        if any(c in LEAD_IDENTITY for c in difs):
+            motivo = "cambió la identidad del lead (inmutable)"
+        elif R["opt_out"] == "true" or R["estado_pipeline"] == "no_contactar":
+            motivo = "dado de baja en D1: no se modifica"
+        steps = _path(local, R["estado_pipeline"], L["estado_pipeline"]) if not motivo else []
+        if not motivo and steps is None:
+            motivo = f"transición no permitida {R['estado_pipeline']} → {L['estado_pipeline']}"
+        if motivo:
+            rep["conflictos"].append({"tabla": "leads", "clave": L["lead_id"], "campos": difs, "motivo": motivo})
+            continue
+        fields = {c: L[c] for c in mutable}
+        # Guarda: solo aplica si en D1 el lead sigue como en la exportación (o ya va en esta misma actualización);
+        # si alguien lo cambió en el dashboard después, el UPDATE no toca nada y la verificación lo mostrará.
+        guard = (R["fecha_actualizacion"], L["fecha_actualizacion"])
+        for st in steps[:-1]:  # estados intermedios con los datos finales (cumplen las mismas restricciones)
+            out.append(_sql_update(local, "leads", {**fields, "estado_pipeline": st}, "lead_id", L["lead_id"], guard))
+        out.append(_sql_update(local, "leads", fields, "lead_id", L["lead_id"], guard))
+        rep["actualizar"]["leads"].append({"clave": L["lead_id"], "campos": difs, "pasos": steps})
+    return out
+
+
+def _sql_update(db, table, fields, key, value, guard=()):
+    q = lambda v: db.execute("SELECT quote(?)", (v,)).fetchone()[0]
+    sets = ",".join(f"{c}={q(v)}" for c, v in fields.items())
+    cond = f" AND fecha_actualizacion IN ({','.join(q(g) for g in guard)})" if guard else ""
+    return f'UPDATE "{table}" SET {sets} WHERE {key}={q(value)}{cond};'
+
+
 def delta(local, remote):
     """Compara la base construida desde los CSV (local) con D1 (remote). Devuelve (sentencias, informe)."""
-    out, rep = [], {"insertar": {}, "conflictos": [], "solo_d1": {}, "documentos_version_nueva": []}
+    out, rep = [], {"insertar": {}, "actualizar": {"leads": []}, "conflictos": [], "solo_d1": {}, "documentos_version_nueva": []}
+    upd = []
     for t in ["leads", "interactions", "followups", "suppression", "candidates"]:
         cols = [c for c in _cols(local, t) if c in _cols(remote, t)]
         k = DELTA_KEYS[t]
@@ -259,10 +333,22 @@ def delta(local, remote):
         lo, re_ = idx(_rows(local, t, cols)), idx(_rows(remote, t, cols))
         comparable = [c for c in cols if not (t == "candidates" and c in ("creado_en", "actualizado_en"))]
         nuevos = [lo[key] for key in lo if key not in re_]
+        if t == "leads":
+            upd = _lead_updates(local, lo, re_, cols, rep)
         for key in lo.keys() & re_.keys():
             if any(str(lo[key][c] or "") != str(re_[key][c] or "") for c in comparable):
                 difs = [c for c in comparable if str(lo[key][c] or "") != str(re_[key][c] or "")]
-                rep["conflictos"].append({"tabla": t, "clave": "|".join(map(str, key)), "campos": difs})
+                ident = "|".join(map(str, key))
+                if t == "leads":
+                    tl, tr = _ts(lo[key]["fecha_actualizacion"]), _ts(re_[key]["fecha_actualizacion"])
+                    if tl and tr and tl > tr:
+                        continue  # se actualiza (o ya quedó como conflicto en _lead_updates)
+                    motivo = "D1 más nuevo: ejecutar crm_tool.py pull-d1 primero" if tl and tr and tr > tl else "misma fecha y contenido distinto"
+                    rep["conflictos"].append({"tabla": t, "clave": ident, "campos": difs, "motivo": motivo})
+                elif t == "candidates":
+                    rep.setdefault("avisos", []).append({"tabla": t, "clave": ident, "campos": difs, "motivo": "estado de revisión distinto (no se sincroniza)"})
+                else:
+                    rep["conflictos"].append({"tabla": t, "clave": ident, "campos": difs})
         rep["insertar"][t] = len(nuevos)
         rep["solo_d1"][t] = sorted("|".join(map(str, key)) for key in re_.keys() - lo.keys())
         out += [_sql_insert(local, t, r) for r in nuevos]
@@ -287,6 +373,8 @@ def delta(local, remote):
     rep["solo_d1"]["documents"] = sorted(set(remote_docs) - {r["path"] for r in _rows(local, "documents", ["path"])})
     order = {t: i for i, t in enumerate(DELTA_ORDER)}
     out.sort(key=lambda s: order.get(s.split('"')[1], 99))
+    n_leads = sum(1 for s in out if s.startswith('INSERT INTO "leads"'))
+    out = out[:n_leads] + upd + out[n_leads:]  # actualizaciones de leads justo después de las altas de leads
     rep["sentencias_grandes"] = [s[:60] for s in out if len(s.encode("utf-8")) > D1_MAX_STATEMENT]
     return out, rep
 
@@ -309,7 +397,8 @@ def cmd_delta(a):
         stamp = datetime.now(TZ).strftime("%Y%m%d-%H%M%S")
         out = Path(a.out) if a.out else SEED_DIR / f"delta-{stamp}.sql"
         header = (f"-- Delta local → D1 generado por scripts/d1_migrate.py el {datetime.now(TZ).isoformat(timespec='seconds')}\n"
-                  f"-- Solo altas (INSERT): si D1 cambió desde la exportación, la ejecución falla completa y no aplica nada.\n"
+                  f"-- Altas (INSERT: fallan si ya existen) y leads más recientes en local (UPDATE con guarda de fecha_actualizacion).\n"
+                  f"-- Si D1 cambió desde la exportación: las altas fallan completas; las actualizaciones de ese lead no tocan nada.\n"
                   f"-- Contiene datos de contacto: NO versionar.\n")
         out.write_text(header + "\n".join(stmts) + "\n", encoding="utf-8")
         rep["archivo"] = str(out.relative_to(REPO)) if out.is_relative_to(REPO) else str(out)
