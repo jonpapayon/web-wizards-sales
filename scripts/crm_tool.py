@@ -20,7 +20,8 @@ Comandos de escritura (todos auditados en data/crm/audit.jsonl):
   suppress (--lead WW-... | --valor V --tipo T) --motivo M --fuente "..." [--nota "..."] [--por nombre]
   backfill-evidence                                  (crea data/research/<lead_id>.evidence.json faltantes)
   export [--dir ruta]                                (copia CSV y auditoría a data/exports/<fecha-hora>/)
-  pull-d1 --sql DUMP.sql [--dry-run]                 (trae a local lo hecho en el dashboard; D1 gana, salvo bajas locales)
+  pull-d1 --sql DUMP.sql [--dry-run]                 (trae a local lo hecho en el dashboard; gana el más reciente)
+  migrate-headers [--dry-run]                        (agrega al CSV las columnas nuevas del esquema, vacías)
 
 Entorno: WW_ROOT apunta a otra raíz de datos (modo demo y pruebas); el esquema siempre es el del repositorio.
 
@@ -933,6 +934,27 @@ def cmd_export(schema, a):
     print(json.dumps({"exportado": str(out)}, ensure_ascii=False))
 
 
+def cmd_migrate_headers(schema, a):
+    """Agrega al final las columnas nuevas del esquema (vacías). Nunca quita, reordena ni modifica valores."""
+    done = {}
+    with locked():
+        for kind in FILES:
+            fields, rows = read_csv(kind)
+            want = headers(schema, kind)
+            if fields == want:
+                continue
+            if fields != want[:len(fields)]:
+                raise CRMError(f"{kind}.csv: los encabezados no son un prefijo del esquema; no se migra automáticamente.")
+            if kind == "suppression":
+                raise CRMError("suppression.csv es solo de anexado; su esquema no debe crecer sin revisión humana.")
+            if not a.dry_run:
+                write_csv(kind, want, rows)
+            done[kind] = want[len(fields):]
+        if done and not a.dry_run:
+            audit("esquema.columnas_agregadas", a.por, "crm", {k: v for k, v in done.items()})
+    print(json.dumps({"columnas_agregadas": done, "dry_run": bool(a.dry_run)}, ensure_ascii=False))
+
+
 # ----------------------------------------------------------------------------- sincronización D1 → local
 PULL_KEYS = {"leads": ("lead_id",), "interactions": ("interaccion_id",), "followups": ("seguimiento_id",), "suppression": ("tipo", "valor")}
 PULL_DOC_DIRS = ("data/research/", "data/outreach/")
@@ -1095,6 +1117,7 @@ def main():
     c = add("export"); c.add_argument("--dir")
     c = add("show"); c.add_argument("lead_id")
     c = add("pull-d1"); c.add_argument("--sql", required=True); c.add_argument("--dry-run", action="store_true")
+    c = add("migrate-headers"); c.add_argument("--dry-run", action="store_true")
     a = p.parse_args()
     schema = load_schema()
     try:

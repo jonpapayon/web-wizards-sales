@@ -127,18 +127,20 @@ def main():
     tool("update-lead", L, "--set", "estado_pipeline=aprobado", "--set", "aprobado_por=Persona Demo", "--set", f"proximo_seguimiento={d1}")
     tool("add-interaction", "--json", json.dumps({"lead_id": L, "canal": "email", "direccion": "saliente", "tipo": "mensaje_inicial",
          "resumen": "[DEMO] Enviado manualmente por una persona.", "enviado_por": "humano", "aprobacion_ref": "Persona Demo", "registrado_por": "seed-demo"}))
-    tool("update-lead", L, "--set", "estado_pipeline=contactado", "--set", f"proximo_seguimiento={d2}", "--set", f"fecha_primer_contacto={TODAY}T11:00:00-06:00")
+    tool("update-lead", L, "--set", "estado_pipeline=contactado", "--set", f"proximo_seguimiento={d2}", "--set", f"fecha_primer_contacto={TODAY}T11:00:00-06:00",
+         "--set", "proxima_accion=[DEMO] Enviar seguimiento 1 por email")
     tool("add-followup", "--json", json.dumps({"lead_id": L, "fecha_programada": d2, "ventana_horaria": "10:00-13:00", "numero_seguimiento": 1, "canal": "email", "plantilla_id": "FU1-email"}))
     # medicentro: respondió y tiene reunión
     L = ids["medicentro"]
     for st in ("mensaje_borrador", "pendiente_aprobacion"):
         tool("update-lead", L, "--set", f"estado_pipeline={st}", *(["--set", "aprobacion_estado=pendiente"] if st == "pendiente_aprobacion" else []))
     tool("update-lead", L, "--set", "estado_pipeline=aprobado", "--set", "aprobado_por=Persona Demo", "--set", f"proximo_seguimiento={d1}")
-    tool("update-lead", L, "--set", "estado_pipeline=contactado", "--set", f"proximo_seguimiento={d1}", "--set", f"fecha_primer_contacto={TODAY}T09:30:00-06:00")
+    tool("update-lead", L, "--set", "estado_pipeline=contactado", "--set", f"proximo_seguimiento={d1}", "--set", f"fecha_primer_contacto={TODAY}T09:30:00-06:00",
+         "--set", "proxima_accion=[DEMO] Revisar si respondió")
     tool("add-interaction", "--json", json.dumps({"lead_id": L, "canal": "email", "direccion": "entrante", "tipo": "respuesta_lead",
          "resumen": "[DEMO] Pide una llamada la próxima semana.", "enviado_por": "lead", "resultado": "respondido", "sentimiento": "positivo", "registrado_por": "seed-demo"}))
-    tool("update-lead", L, "--set", "estado_pipeline=en_conversacion", "--set", f"proximo_seguimiento={d1}")
-    tool("update-lead", L, "--set", "estado_pipeline=reunion_agendada", "--set", f"proximo_seguimiento={d2}")
+    tool("update-lead", L, "--set", "estado_pipeline=en_conversacion", "--set", f"proximo_seguimiento={d1}", "--set", "proxima_accion=[DEMO] Proponer horario de llamada")
+    tool("update-lead", L, "--set", "estado_pipeline=reunion_agendada", "--set", f"proximo_seguimiento={d2}", "--set", "proxima_accion=[DEMO] Preparar demo de confirmación de citas")
     # dentalnorte: baja (demuestra exclusión irreversible)
     tool("suppress", "--lead", ids["dentalnorte"], "--motivo", "opt_out", "--fuente", "[DEMO] respondió 'no me interesa'")
     print(json.dumps({"demo": str(DEMO), "leads": ids, "en_revision": ["vetsur", "ortoplus"]}, ensure_ascii=False, indent=2))

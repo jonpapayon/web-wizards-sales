@@ -105,13 +105,32 @@
         "aprobado",
         "contactado",
         "en_conversacion",
+        "interesado",
         "reunion_agendada",
+        "demo_realizada",
         "propuesta_enviada",
+        "negociacion",
         "ganado",
         "perdido",
         "pausado",
         "no_contactar"
       ]
+    },
+    "motivoPerdida": {
+      "enum": [
+        "sin_respuesta",
+        "no_interesado",
+        "precio",
+        "sin_presupuesto",
+        "ya_tiene_proveedor",
+        "no_es_momento",
+        "fuera_de_perfil",
+        "otro"
+      ]
+    },
+    "monto": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]{1,2})?$"
     },
     "evidencia": {
       "type": "object",
@@ -640,9 +659,116 @@
         },
         "fecha_actualizacion": {
           "$ref": "#/$defs/fechaHora"
+        },
+        "proxima_accion": {
+          "type": "string"
+        },
+        "motivo_perdida": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/motivoPerdida"
+            },
+            {
+              "$ref": "#/$defs/vacio"
+            }
+          ]
+        },
+        "fecha_demo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fecha"
+            },
+            {
+              "$ref": "#/$defs/vacio"
+            }
+          ]
+        },
+        "fecha_propuesta": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fecha"
+            },
+            {
+              "$ref": "#/$defs/vacio"
+            }
+          ]
+        },
+        "monto_implementacion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/monto"
+            },
+            {
+              "$ref": "#/$defs/vacio"
+            }
+          ]
+        },
+        "monto_mensual": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/monto"
+            },
+            {
+              "$ref": "#/$defs/vacio"
+            }
+          ]
         }
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "estado_pipeline": {
+                "const": "perdido"
+              }
+            },
+            "required": [
+              "estado_pipeline"
+            ]
+          },
+          "then": {
+            "required": [
+              "motivo_perdida"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "estado_pipeline": {
+                "const": "demo_realizada"
+              }
+            },
+            "required": [
+              "estado_pipeline"
+            ]
+          },
+          "then": {
+            "required": [
+              "fecha_demo"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "estado_pipeline": {
+                "enum": [
+                  "propuesta_enviada",
+                  "negociacion"
+                ]
+              }
+            },
+            "required": [
+              "estado_pipeline"
+            ]
+          },
+          "then": {
+            "required": [
+              "fecha_propuesta"
+            ]
+          }
+        },
         {
           "if": {
             "properties": {
@@ -690,8 +816,11 @@
                 "enum": [
                   "contactado",
                   "en_conversacion",
+                  "interesado",
                   "reunion_agendada",
+                  "demo_realizada",
                   "propuesta_enviada",
+                  "negociacion",
                   "pausado"
                 ]
               }
@@ -702,7 +831,8 @@
           },
           "then": {
             "required": [
-              "proximo_seguimiento"
+              "proximo_seguimiento",
+              "proxima_accion"
             ]
           }
         },
@@ -986,8 +1116,11 @@
   "x-estados-con-seguimiento": [
     "contactado",
     "en_conversacion",
+    "interesado",
     "reunion_agendada",
+    "demo_realizada",
     "propuesta_enviada",
+    "negociacion",
     "pausado"
   ],
   "x-transiciones": {
@@ -1014,23 +1147,47 @@
       "perdido"
     ],
     "en_conversacion": [
+      "interesado",
       "reunion_agendada",
       "pausado",
       "perdido"
     ],
+    "interesado": [
+      "reunion_agendada",
+      "propuesta_enviada",
+      "pausado",
+      "perdido"
+    ],
     "reunion_agendada": [
+      "demo_realizada",
       "propuesta_enviada",
       "en_conversacion",
+      "pausado",
+      "perdido"
+    ],
+    "demo_realizada": [
+      "propuesta_enviada",
+      "interesado",
+      "pausado",
       "perdido"
     ],
     "propuesta_enviada": [
+      "negociacion",
       "ganado",
       "perdido",
-      "en_conversacion"
+      "en_conversacion",
+      "pausado"
+    ],
+    "negociacion": [
+      "ganado",
+      "perdido",
+      "propuesta_enviada",
+      "pausado"
     ],
     "pausado": [
       "mensaje_borrador",
       "en_conversacion",
+      "interesado",
       "perdido"
     ],
     "descartado": [],

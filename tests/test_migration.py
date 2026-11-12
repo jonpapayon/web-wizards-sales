@@ -205,6 +205,16 @@ class D1Compat(unittest.TestCase):
             db.executescript(m.read_text(encoding="utf-8"))
         return db
 
+    def test_transiciones_y_columnas_de_d1_coinciden_con_el_esquema(self):
+        s = json.loads((REPO / "data" / "schema" / "crm.schema.json").read_text(encoding="utf-8"))
+        db = self.d1()
+        want = {(a, b) for a, v in s["x-transiciones"].items() for b in v}
+        self.assertEqual(set(db.execute("SELECT desde, hacia FROM allowed_transitions")), want)
+        self.assertEqual([r[1] for r in db.execute("PRAGMA table_info(leads)")], list(s["$defs"]["lead"]["properties"]))
+        estados = set(s["$defs"]["estadoPipeline"]["enum"])
+        sql = db.execute("SELECT sql FROM sqlite_master WHERE name='leads'").fetchone()[0]
+        self.assertTrue(all(f"'{e}'" in sql for e in estados), "el CHECK de estado_pipeline debe aceptar todos los estados del esquema")
+
     def test_esquema_final_sin_patrones_largos(self):
         import re
         sql = " ".join(r[0] for r in self.d1().execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL"))

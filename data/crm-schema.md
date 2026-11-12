@@ -69,6 +69,12 @@ Cuando se migre a Google Sheets, cada CSV será una pestaña con las mismas colu
 | `responsable` | texto | no | Persona de Web Wizards a cargo. |
 | `notas` | texto | no | |
 | `fecha_actualizacion` | fecha-hora | sí | Última modificación del registro. |
+| `proxima_accion` | texto | condicional | Acción concreta siguiente ("Llamar para confirmar demo"). Obligatoria en estados activos, junto con `proximo_seguimiento` (su fecha). |
+| `motivo_perdida` | enum | condicional | Obligatorio en `perdido`: `sin_respuesta`, `no_interesado`, `precio`, `sin_presupuesto`, `ya_tiene_proveedor`, `no_es_momento`, `fuera_de_perfil`, `otro`. |
+| `fecha_demo` | fecha | condicional | Fecha de la demostración. Obligatoria en `demo_realizada`. |
+| `fecha_propuesta` | fecha | condicional | Fecha en que se envió la propuesta. Obligatoria en `propuesta_enviada` y `negociacion`. |
+| `monto_implementacion` | decimal | no | MXN sin separadores, ej. `6000`. Lo captura una persona; nunca va en mensajes automáticos. |
+| `monto_mensual` | decimal | no | MXN mensuales propuestos, ej. `1500`. |
 
 ### Estados del pipeline (`estado_pipeline`)
 
@@ -84,15 +90,20 @@ Significado de cada estado (descriptivo):
 | `pendiente_aprobacion` | Borrador revisado por cumplimiento; espera aprobación humana. |
 | `aprobado` | Aprobado por una persona; aún no enviado. |
 | `contactado` | Mensaje inicial enviado; corre la cadencia (`policies/contact-cadence.md`). |
-| `en_conversacion` | El lead respondió y hay diálogo activo. |
-| `reunion_agendada` | Hay fecha de llamada o reunión. |
-| `propuesta_enviada` | Una persona envió una propuesta o cotización. |
+| `en_conversacion` | El lead respondió y hay diálogo activo (en el dashboard: "Respondió"). |
+| `interesado` | Mostró interés concreto en un servicio. |
+| `reunion_agendada` | Hay fecha de llamada o demostración (en el dashboard: "Demo programada"). |
+| `demo_realizada` | La demostración ya ocurrió (`fecha_demo`). |
+| `propuesta_enviada` | Una persona envió una propuesta o cotización (`fecha_propuesta`). |
+| `negociacion` | Se discuten alcance, precio o condiciones de la propuesta. |
 | `ganado` | Cliente. Final. |
-| `perdido` | Cadencia completa sin respuesta, o declinó en negociación sin pedir que no se le contacte. Final; sin más prospección. |
-| `pausado` | El lead pidió ser contactado en una fecha concreta (`policies/contact-cadence.md` §2). |
+| `perdido` | Cadencia completa sin respuesta, o declinó sin pedir que no se le contacte. Final; exige `motivo_perdida`. |
+| `pausado` | Seguimiento futuro: el lead pidió ser contactado en una fecha concreta (`policies/contact-cadence.md` §2). En el dashboard: "Seguimiento futuro". |
 | `no_contactar` | Baja o restricción legal (`policies/opt-out.md`). Final e irreversible en el sistema. Solo se llega mediante `crm_tool.py suppress`. |
 
-`proximo_seguimiento` es obligatorio en los estados de `x-estados-con-seguimiento`.
+`proximo_seguimiento` y `proxima_accion` son obligatorios en los estados de `x-estados-con-seguimiento`.
+
+Equivalencia con el pipeline comercial: Nuevo / Por investigar = candidato en revisión (aún no es lead) · Calificado = `calificado` · Contacto pendiente = `mensaje_borrador`…`aprobado` · Primer contacto = `contactado` · Respondió = `en_conversacion` · Interesado = `interesado` · Demo programada = `reunion_agendada` · Demo realizada = `demo_realizada` · Propuesta = `propuesta_enviada` · Negociación = `negociacion` · Ganado · Perdido · Seguimiento futuro = `pausado` · No contactar = `no_contactar`.
 
 ---
 
