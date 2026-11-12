@@ -51,18 +51,26 @@ Todos los comandos desde `cloudflare/`.
 4. Recomendado: Cloudflare Access (Zero Trust, gratis hasta 50 usuarios) delante del dominio; define `CF_ACCESS_TEAM_DOMAIN` y `CF_ACCESS_AUD` y el Worker validará el JWT.
 5. Más adelante: activar DNSSEC en Cloudflare y publicar el DS en Namecheap.
 
-## Sincronizar el CRM local con D1 (solo altas)
-D1 es la fuente principal. El pipeline local (`crm_tool.py`, CSV) registra leads nuevos; para que aparezcan en `sales.webwizards.click`:
+## Sincronizar el CRM local con D1 (en los dos sentidos)
+D1 es la fuente principal. El pipeline local (`crm_tool.py`, CSV) registra leads nuevos; el dashboard registra aprobaciones, envíos y bajas.
+
+**Rangos de IDs separados** (nunca chocan): el CRM local numera WW 001–499 e INT/FU 0001–4999 por día; el Worker WW 500–999 e INT/FU 5000–9999 (`cloudflare/src/db.js › nextId`, `scripts/crm_tool.py › next_id`).
+
+**Orden de cada sincronización:**
 
 1. **Exportar D1** (lectura; lo hace una persona, desde `cloudflare/`):
    `mkdir -p ../data/exports && npx wrangler d1 export ww-sales --remote --output ../data/exports/d1-remote.sql`
-2. **Calcular el delta** (desde la raíz): `python3 scripts/d1_migrate.py delta --remote-sql data/exports/d1-remote.sql`
+2. **Traer lo del dashboard a local** (desde la raíz): `python3 scripts/crm_tool.py pull-d1 --sql data/exports/d1-remote.sql` (primero `--dry-run`).
+   - Agrega leads, interacciones, seguimientos y bajas que solo existen en D1; actualiza leads y seguimientos que cambiaron en D1 (gana D1).
+   - **Nunca revierte una baja local** (la reporta como conflicto: hay que aplicarla en el dashboard). Interacciones y bajas son inmutables: mismo ID con contenido distinto = conflicto.
+   - Documentos editados en el dashboard (borradores) se escriben en `data/research/` o `data/outreach/`, solo si el archivo local no tenía cambios propios.
+3. **Calcular el delta** (desde la raíz): `python3 scripts/d1_migrate.py delta --remote-sql data/exports/d1-remote.sql`
    - Emite solo `INSERT` de lo que existe en local y falta en D1 → `cloudflare/seed/delta-<fecha>.sql` (no versionado).
    - **Conflictos** (misma clave, contenido distinto, p. ej. un lead aprobado en el dashboard): se reportan y **no** se emiten; gana D1.
-   - **Solo en D1** (cambios hechos en el dashboard): se reportan. Las **bajas** que aparezcan ahí se aplican de inmediato en local con `crm_tool.py suppress`.
+   - **Solo en D1:** se reporta; después del paso 2 debe salir vacío.
    - `audit_log` no se sincroniza: cada entorno lleva su propia auditoría. Documentos con cambios entran como versión nueva.
-3. **Aplicar** (una persona, desde `cloudflare/`): `npx wrangler d1 execute ww-sales --remote --file seed/delta-<fecha>.sql`. Si D1 cambió desde la exportación, falla completo y no aplica nada: repetir desde el paso 1.
-4. **Verificar:** repetir 1–2; el delta debe salir vacío.
+4. **Aplicar** (una persona, desde `cloudflare/`): `npx wrangler d1 execute ww-sales --remote --file seed/delta-<fecha>.sql`. Si D1 cambió desde la exportación, falla completo y no aplica nada: repetir desde el paso 1.
+5. **Verificar:** repetir 1–3; `pull-d1 --dry-run` y el delta deben salir sin cambios.
 
 ## Verificación tras desplegar
 - `GET /api/health` → `200 {"ok":true,"version":…,"servicio":"ww-sales"}`.

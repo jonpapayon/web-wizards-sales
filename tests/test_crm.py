@@ -141,5 +141,91 @@ class PilotIntact(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
 
 
+class PullD1(unittest.TestCase):
+    """pull-d1: lo hecho en el dashboard (D1) llega al CRM local; D1 gana salvo bajas locales; IDs sin choques."""
+
+    def setUp(self):
+        import os, sqlite3, subprocess, sys
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        self.root = temp_root()
+        self.day = datetime.now(ZoneInfo("America/Mexico_City")).strftime("%Y%m%d")
+        self.remote = self.root / "remote.sqlite"
+        r = subprocess.run([sys.executable, str(REPO / "scripts" / "d1_migrate.py"), "apply-local", "--db", str(self.remote)],
+                           capture_output=True, text=True, env=dict(os.environ, WW_ROOT=str(self.root)))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.db = sqlite3.connect(self.remote)
+
+    def tearDown(self):
+        self.db.close()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def dump(self):
+        self.db.commit()
+        p = self.root / "d1.sql"
+        p.write_text("\n".join(self.db.iterdump()), encoding="utf-8")
+        return str(p)
+
+    def open_lead(self):
+        return next(L for L in read_csv(self.root, "leads") if L["opt_out"] == "false" and L["estado_pipeline"] == "calificado")
+
+    def test_dashboard_changes_come_back(self):
+        L = self.open_lead()
+        self.db.execute("UPDATE leads SET notas = 'nota del dashboard' WHERE lead_id = ?", (L["lead_id"],))
+        iid = f"INT-{self.day}-5001"  # rango del Worker
+        self.db.execute("""INSERT INTO interactions (interaccion_id,lead_id,fecha_hora,canal,direccion,tipo,resumen,enviado_por,resultado,sentimiento,registrado_por)
+                           VALUES (?,?,?,'interno','interna','nota','desde el dashboard','humano','n/a','n/a','dashboard:prueba')""",
+                        (iid, L["lead_id"], "2099-01-01T10:00:00-06:00"))
+        sql = self.dump()
+        code, out, err = tool(self.root, "pull-d1", "--sql", sql, "--dry-run")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(next(x for x in read_csv(self.root, "leads") if x["lead_id"] == L["lead_id"])["notas"], L["notas"], "dry-run no escribe")
+        code, out, err = tool(self.root, "pull-d1", "--sql", sql)
+        self.assertEqual(code, 0, err)
+        rep = json.loads(out)
+        self.assertEqual(rep["agregar"]["interactions"], [iid])
+        self.assertEqual(rep["conflictos"], [])
+        self.assertEqual(next(x for x in read_csv(self.root, "leads") if x["lead_id"] == L["lead_id"])["notas"], "nota del dashboard")
+        self.assertIn(iid, [i["interaccion_id"] for i in read_csv(self.root, "interactions")])
+        self.assertEqual(tool(self.root, "validate")[0], 0)
+        # segunda vez: nada que hacer
+        rep2 = json.loads(tool(self.root, "pull-d1", "--sql", sql)[1])
+        self.assertEqual((rep2["agregar"]["interactions"], rep2["actualizar"]["leads"]), ([], []))
+
+    def test_local_optout_is_never_reverted(self):
+        L = self.open_lead()
+        sql = self.dump()  # D1 sin la baja
+        code, out, err = tool(self.root, "suppress", "--lead", L["lead_id"], "--motivo", "opt_out", "--fuente", "prueba: respondió BAJA")
+        self.assertEqual(code, 0, out + err)
+        code, out, err = tool(self.root, "pull-d1", "--sql", sql)
+        self.assertEqual(code, 0, err)
+        rep = json.loads(out)
+        self.assertTrue(any(c["clave"] == L["lead_id"] and "baja local" in c["motivo"] for c in rep["conflictos"]), rep)
+        after = next(x for x in read_csv(self.root, "leads") if x["lead_id"] == L["lead_id"])
+        self.assertEqual((after["opt_out"], after["estado_pipeline"]), ("true", "no_contactar"))
+
+    def test_local_ids_stay_below_worker_range(self):
+        L = self.open_lead()
+        self.db.execute("""INSERT INTO interactions (interaccion_id,lead_id,fecha_hora,canal,direccion,tipo,resumen,enviado_por,resultado,sentimiento,registrado_por)
+                           VALUES (?,?,'2099-01-01T10:00:00-06:00','interno','interna','nota','dashboard','humano','n/a','n/a','dashboard:prueba')""",
+                        (f"INT-{self.day}-5007", L["lead_id"]))
+        self.assertEqual(tool(self.root, "pull-d1", "--sql", self.dump())[0], 0)
+        code, out, err = tool(self.root, "add-interaction", "--json", json.dumps(
+            {"lead_id": L["lead_id"], "canal": "interno", "direccion": "interna", "tipo": "nota", "resumen": "nota local",
+             "enviado_por": "humano", "registrado_por": "pruebas"}))
+        self.assertEqual(code, 0, out + err)
+        nuevos = [i["interaccion_id"] for i in read_csv(self.root, "interactions") if i["resumen"] == "nota local"]
+        self.assertEqual(len(nuevos), 1)
+        self.assertLess(int(nuevos[0][-4:]), 5000, "el CRM local no invade el rango del Worker")
+
+    def test_rejects_paths_outside_data_dirs(self):
+        self.db.execute("""INSERT INTO documents (path,kind,lead_id,version,content,sha256,creado_en,creado_por)
+                           VALUES ('../../etc/x.md','borrador','',1,'x','0','2099','dashboard')""")
+        code, out, err = tool(self.root, "pull-d1", "--sql", self.dump())
+        self.assertEqual(code, 0, err)
+        self.assertTrue(any(c["tabla"] == "documents" for c in json.loads(out)["conflictos"]))
+        self.assertFalse((self.root.parent / "etc" / "x.md").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

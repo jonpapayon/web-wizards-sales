@@ -20,6 +20,7 @@ Comandos de escritura (todos auditados en data/crm/audit.jsonl):
   suppress (--lead WW-... | --valor V --tipo T) --motivo M --fuente "..." [--nota "..."] [--por nombre]
   backfill-evidence                                  (crea data/research/<lead_id>.evidence.json faltantes)
   export [--dir ruta]                                (copia CSV y auditoría a data/exports/<fecha-hora>/)
+  pull-d1 --sql DUMP.sql [--dry-run]                 (trae a local lo hecho en el dashboard; D1 gana, salvo bajas locales)
 
 Entorno: WW_ROOT apunta a otra raíz de datos (modo demo y pruebas); el esquema siempre es el del repositorio.
 
@@ -383,11 +384,13 @@ def find_duplicates(cand, leads, exclude_id=None):
 
 
 def next_id(prefix, rows, field, width):
-    base = f"{prefix}-{today()}-"
-    nums = [int(r[field][len(base):]) for r in rows if r.get(field, "").startswith(base)]
-    n = max(nums, default=0) + 1
-    if n >= 10 ** width:
-        raise CRMError(f"Se agotó el consecutivo diario de {prefix}")
+    """Rango diario local: 1 … mitad-1 (WW 001–499, INT/FU 0001–4999). El Worker usa de la mitad en adelante
+    (cloudflare/src/db.js › nextId), así que los IDs locales y los del dashboard nunca chocan."""
+    base, limit = f"{prefix}-{today()}-", 5 * 10 ** (width - 1)
+    nums = [int(r[field][len(base):]) for r in rows if r.get(field, "").startswith(base) and r[field][len(base):].isdigit()]
+    n = max([x for x in nums if x < limit], default=0) + 1
+    if n >= limit:
+        raise CRMError(f"Se agotó el consecutivo diario local de {prefix} (rango 1–{limit - 1}; el resto es del Worker)")
     return f"{base}{n:0{width}d}"
 
 
@@ -930,6 +933,107 @@ def cmd_export(schema, a):
     print(json.dumps({"exportado": str(out)}, ensure_ascii=False))
 
 
+# ----------------------------------------------------------------------------- sincronización D1 → local
+PULL_KEYS = {"leads": ("lead_id",), "interactions": ("interaccion_id",), "followups": ("seguimiento_id",), "suppression": ("tipo", "valor")}
+PULL_DOC_DIRS = ("data/research/", "data/outreach/")
+
+
+def _d1_rows(db, table, fields):
+    import sqlite3
+    db.row_factory = sqlite3.Row
+    cols = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
+    return [{f: to_cell(r[f]) if f in cols else "" for f in fields} for r in db.execute(f"SELECT * FROM {table}")]
+
+
+def _sha(s):
+    import hashlib
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+def pull_plan(schema, db):
+    """Compara D1 con los CSV locales. D1 es la fuente principal, salvo que las bajas locales nunca se revierten."""
+    plan = {"agregar": {}, "actualizar": {}, "conflictos": [], "solo_local": {}, "documentos": [], "_rows": {}}
+    for kind, key in PULL_KEYS.items():
+        fields, local = read_csv(kind)
+        remote = _d1_rows(db, kind, fields)
+        k = lambda r: tuple(r[c] for c in key)
+        lo, re_ = {k(r): r for r in local}, {k(r): r for r in remote}
+        add, upd = [r for kk, r in re_.items() if kk not in lo], []
+        for kk in lo.keys() & re_.keys():
+            L, R = lo[kk], re_[kk]
+            difs = [f for f in fields if L.get(f, "") != R.get(f, "")]
+            if not difs:
+                continue
+            ident = "|".join(kk)
+            if kind in ("interactions", "suppression"):  # historial inmutable / solo anexado
+                plan["conflictos"].append({"tabla": kind, "clave": ident, "campos": difs, "motivo": "inmutable: mismo ID con contenido distinto"})
+            elif kind == "leads" and (L["opt_out"] == "true" or L["estado_pipeline"] == "no_contactar") and \
+                    (R["opt_out"] != "true" or R["estado_pipeline"] != "no_contactar"):
+                plan["conflictos"].append({"tabla": kind, "clave": ident, "campos": difs,
+                                           "motivo": "baja local: no se revierte (policies/opt-out.md); falta aplicarla en D1"})
+            elif kind == "followups" and L["estado"] in ("enviado", "cancelado") and R["estado"] != L["estado"]:
+                plan["conflictos"].append({"tabla": kind, "clave": ident, "campos": difs, "motivo": "seguimiento cerrado en local"})
+            else:
+                upd.append((L, R, difs))
+        for r in add:
+            errs = validate_row(schema, kind, r)
+            if errs:
+                plan["conflictos"].append({"tabla": kind, "clave": "|".join(k(r)), "motivo": "inválido: " + "; ".join(errs)})
+        add = [r for r in add if not validate_row(schema, kind, r)]
+        plan["agregar"][kind] = [ "|".join(k(r)) for r in add]
+        plan["actualizar"][kind] = [{"clave": "|".join(k(L)), "campos": d} for L, R, d in upd]
+        plan["solo_local"][kind] = sorted("|".join(kk) for kk in lo.keys() - re_.keys())
+        plan["_rows"][kind] = (fields, local, add, upd)
+    # documentos: última versión de D1 por ruta (solo data/research y data/outreach)
+    import sqlite3
+    db.row_factory = sqlite3.Row
+    latest = {}
+    for r in db.execute("SELECT path, version, content, sha256 FROM documents ORDER BY path, version"):
+        latest.setdefault(r["path"], []).append(dict(r))
+    for path, versions in sorted(latest.items()):
+        p = Path(path)
+        if p.is_absolute() or ".." in p.parts or not path.startswith(PULL_DOC_DIRS):
+            plan["conflictos"].append({"tabla": "documents", "clave": path, "motivo": "ruta fuera de data/research o data/outreach"})
+            continue
+        last, dest = versions[-1], ROOT / path
+        if dest.exists():
+            cur = _sha(dest.read_text(encoding="utf-8"))
+            if cur == last["sha256"]:
+                continue
+            if cur not in {v["sha256"] for v in versions[:-1]}:
+                plan["conflictos"].append({"tabla": "documents", "clave": path, "motivo": "editado en local y en D1"})
+                continue
+        plan["documentos"].append({"path": path, "version": last["version"], "content": last["content"]})
+    return plan
+
+
+def cmd_pull_d1(schema, a):
+    import sqlite3
+    db = sqlite3.connect(":memory:")
+    db.executescript(Path(a.sql).read_text(encoding="utf-8"))
+    with locked():
+        plan = pull_plan(schema, db)
+        rows = plan.pop("_rows")
+        report = {**plan, "documentos": [d["path"] for d in plan["documentos"]], "dry_run": bool(a.dry_run)}
+        if a.dry_run:
+            print(json.dumps(report, ensure_ascii=False, indent=2)); return
+        for kind, (fields, local, add, upd) in rows.items():
+            if not add and not upd:
+                continue
+            if kind == "suppression":
+                append_csv(kind, fields, add)  # solo anexado
+                continue
+            byid = {id(L): R for L, R, _ in upd}
+            write_csv(kind, fields, [byid.get(id(r), r) for r in local] + add)
+        for d in plan["documentos"]:
+            dest = ROOT / d["path"]
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(d["content"], encoding="utf-8")
+        audit("sync.d1_a_local", a.por, "crm", {k: {t: len(v) for t, v in plan[k].items()} for k in ("agregar", "actualizar")}
+              | {"documentos": len(plan["documentos"]), "conflictos": len(plan["conflictos"])})
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
 def cmd_show(schema, a):
     _, leads = read_csv("leads")
     _, ints = read_csv("interactions")
@@ -968,6 +1072,7 @@ def main():
     add("backfill-evidence")
     c = add("export"); c.add_argument("--dir")
     c = add("show"); c.add_argument("lead_id")
+    c = add("pull-d1"); c.add_argument("--sql", required=True); c.add_argument("--dry-run", action="store_true")
     a = p.parse_args()
     schema = load_schema()
     try:

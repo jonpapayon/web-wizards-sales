@@ -23,11 +23,15 @@ export const auditStmt = (env, evento, actor, entidad, detalle = {}) =>
   q(env, "INSERT INTO audit_log (ts,evento,actor,entidad,entorno,detalle) VALUES (?,?,?,?,?,?)",
     nowIso(), evento, actor || "api", String(entidad), env.WW_ENTORNO || "real", JSON.stringify(detalle));
 
+// Rangos diarios separados para que el CRM local (crm_tool.py) y el Worker nunca generen el mismo ID:
+// local = 1 … mitad-1 (WW 001–499, INT/FU 0001–4999); Worker = mitad … (WW 500–999, INT/FU 5000–9999).
+export const workerRangeStart = (width) => 5 * 10 ** (width - 1);
 export async function nextId(env, prefix, table, col, width) {
   const day = nowIso().slice(0, 10).replaceAll("-", "");
-  const base = `${prefix}-${day}-`;
-  const r = await first(env, `SELECT MAX(CAST(substr(${col}, ${base.length + 1}) AS INTEGER)) AS n FROM ${table} WHERE ${col} LIKE ?`, base + "%");
-  const n = (r?.n || 0) + 1;
+  const base = `${prefix}-${day}-`, start = workerRangeStart(width);
+  const num = `CAST(substr(${col}, ${base.length + 1}) AS INTEGER)`;
+  const r = await first(env, `SELECT MAX(${num}) AS n FROM ${table} WHERE ${col} LIKE ? AND ${num} >= ?`, base + "%", start);
+  const n = Math.max(r?.n || 0, start - 1) + 1;
   if (n >= 10 ** width) throw new CRMError(`Se agotó el consecutivo diario de ${prefix}`);
   return base + String(n).padStart(width, "0");
 }

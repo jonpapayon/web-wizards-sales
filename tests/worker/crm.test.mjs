@@ -125,3 +125,15 @@ test("persistencia: los datos sobreviven al reabrir la base (archivo)", async ()
   const crm = parseCsv(readFileSync(join(REPO, "data", "crm", "leads.csv"), "utf8")).length - 1;
   assert.equal((await e2.DB.prepare("SELECT COUNT(*) n FROM leads").first()).n, crm);
 });
+
+test("IDs: el Worker numera en su rango (WW 500+, INT/FU 5000+) y no choca con el CRM local", async () => {
+  const { env } = await setup({ seed: "demo" });
+  const { nextId } = await import("../../cloudflare/src/db.js");
+  const lead = await nextId(env, "WW", "leads", "lead_id", 3), int = await nextId(env, "INT", "interactions", "interaccion_id", 4);
+  assert.ok(+lead.slice(-3) >= 500, lead);
+  assert.ok(+int.slice(-4) >= 5000, int);
+  const day = int.slice(4, 12);
+  await env.DB.prepare(`INSERT INTO interactions (interaccion_id,lead_id,fecha_hora,canal,direccion,tipo,resumen,enviado_por,registrado_por)
+    SELECT ?, lead_id, '2099-01-01', 'interno', 'interna', 'nota', 'local', 'humano', 'local' FROM leads LIMIT 1`).bind(`INT-${day}-4999`).run();
+  assert.equal(await nextId(env, "INT", "interactions", "interaccion_id", 4), int, "los IDs locales (<5000) no mueven el contador del Worker");
+});
