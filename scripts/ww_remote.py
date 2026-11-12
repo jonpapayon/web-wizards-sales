@@ -20,7 +20,7 @@ registrar contactos ni bajas, ni leer la lista de exclusión o la auditoría (lo
 Configuración: AGENT_TOKEN y WW_API_BASE (por defecto https://sales.webwizards.click) desde el entorno o .dev.vars.
 El token nunca se imprime. Solo se suben archivos de data/staging, data/research y data/outreach.
 """
-import argparse, json, os, sys, urllib.error, urllib.request
+import argparse, json, os, ssl, sys, urllib.error, urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -55,6 +55,15 @@ def config():
     return base, token
 
 
+def tls_context():
+    """Verificación TLS siempre activa. El Python de python.org en macOS no trae certificados raíz:
+    si el almacén por defecto está vacío, se usa el del sistema (/etc/ssl/cert.pem). Nunca se desactiva la verificación."""
+    ctx = ssl.create_default_context()
+    if not ctx.get_ca_certs() and Path("/etc/ssl/cert.pem").exists():
+        ctx = ssl.create_default_context(cafile="/etc/ssl/cert.pem")
+    return ctx
+
+
 def call(method, path, body=None):
     base, token = config()
     data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -62,7 +71,7 @@ def call(method, path, body=None):
                                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
                                           "User-Agent": "ww-remote/1"})
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=60, context=tls_context()) as r:
             return json.loads(r.read().decode("utf-8") or "{}")
     except urllib.error.HTTPError as e:
         try:
