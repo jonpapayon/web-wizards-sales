@@ -7,6 +7,7 @@ Migración controlada CSV → D1 (SQLite), reversible y verificable. No modifica
     python3 scripts/d1_migrate.py reconcile --db RUTA      # compara fila a fila la base con los CSV y archivos
     python3 scripts/d1_migrate.py export-csv --db RUTA --out DIR    # reversa: base → CSV con los mismos encabezados
     python3 scripts/d1_migrate.py export-csv --sql DUMP.sql --out DIR  # reversa desde `wrangler d1 export`
+    python3 scripts/d1_migrate.py delta --remote-sql DUMP.sql  # altas locales que faltan en D1 → cloudflare/seed/delta-*.sql
 
 Remoto (lo ejecuta una persona, con sesión de Cloudflare):
     npx wrangler d1 migrations apply ww-sales --remote
@@ -225,6 +226,98 @@ def cmd_export_csv(a):
     print(json.dumps({"exportado": str(out)}, ensure_ascii=False))
 
 
+# ------------------------------------------------------------------ sincronización local → D1 (solo altas)
+# D1 es la fuente principal. El delta solo AGREGA lo que existe en local y falta en D1; nunca actualiza ni borra.
+# Una fila con la misma clave y contenido distinto es un conflicto: se reporta y NO se emite (gana D1).
+DELTA_KEYS = {"leads": ["lead_id"], "interactions": ["interaccion_id"], "followups": ["seguimiento_id"],
+              "suppression": ["tipo", "valor"], "candidates": ["id"]}
+DELTA_ORDER = ["leads", "interactions", "followups", "suppression", "documents", "candidates"]
+D1_MAX_STATEMENT = 100_000  # bytes por sentencia en D1
+
+
+def _cols(db, table):
+    return [r[1] for r in db.execute(f"PRAGMA table_info({table})")]
+
+
+def _rows(db, table, cols):
+    db.row_factory = sqlite3.Row
+    return [{c: r[c] for c in cols} for r in db.execute(f"SELECT {','.join(cols)} FROM {table}")]
+
+
+def _sql_insert(db, table, row):
+    vals = ",".join(db.execute("SELECT quote(?)", (v,)).fetchone()[0] for v in row.values())
+    return f'INSERT INTO "{table}" ({",".join(row)}) VALUES ({vals});'
+
+
+def delta(local, remote):
+    """Compara la base construida desde los CSV (local) con D1 (remote). Devuelve (sentencias, informe)."""
+    out, rep = [], {"insertar": {}, "conflictos": [], "solo_d1": {}, "documentos_version_nueva": []}
+    for t in ["leads", "interactions", "followups", "suppression", "candidates"]:
+        cols = [c for c in _cols(local, t) if c in _cols(remote, t)]
+        k = DELTA_KEYS[t]
+        idx = lambda rows: {tuple(r[c] for c in k): r for r in rows}
+        lo, re_ = idx(_rows(local, t, cols)), idx(_rows(remote, t, cols))
+        comparable = [c for c in cols if not (t == "candidates" and c in ("creado_en", "actualizado_en"))]
+        nuevos = [lo[key] for key in lo if key not in re_]
+        for key in lo.keys() & re_.keys():
+            if any(str(lo[key][c] or "") != str(re_[key][c] or "") for c in comparable):
+                difs = [c for c in comparable if str(lo[key][c] or "") != str(re_[key][c] or "")]
+                rep["conflictos"].append({"tabla": t, "clave": "|".join(map(str, key)), "campos": difs})
+        rep["insertar"][t] = len(nuevos)
+        rep["solo_d1"][t] = sorted("|".join(map(str, key)) for key in re_.keys() - lo.keys())
+        out += [_sql_insert(local, t, r) for r in nuevos]
+    # documentos: versionados por ruta. Ruta nueva → versión 1; contenido distinto → versión siguiente.
+    dcols = ["path", "kind", "lead_id", "version", "content", "sha256", "creado_en", "creado_por"]
+    remote_docs = {}
+    for r in _rows(remote, "documents", ["path", "version", "sha256"]):
+        cur = remote_docs.get(r["path"])
+        if not cur or r["version"] > cur["version"]:
+            remote_docs[r["path"]] = r
+    n = 0
+    for r in _rows(local, "documents", dcols):
+        cur = remote_docs.get(r["path"])
+        if cur and cur["sha256"] == r["sha256"]:
+            continue
+        if cur:
+            r["version"] = cur["version"] + 1
+            rep["documentos_version_nueva"].append(r["path"])
+        r["creado_por"] = "sync-local"
+        out.append(_sql_insert(local, "documents", r)); n += 1
+    rep["insertar"]["documents"] = n
+    rep["solo_d1"]["documents"] = sorted(set(remote_docs) - {r["path"] for r in _rows(local, "documents", ["path"])})
+    order = {t: i for i, t in enumerate(DELTA_ORDER)}
+    out.sort(key=lambda s: order.get(s.split('"')[1], 99))
+    rep["sentencias_grandes"] = [s[:60] for s in out if len(s.encode("utf-8")) > D1_MAX_STATEMENT]
+    return out, rep
+
+
+def cmd_delta(a):
+    local = schema_db()
+    fill(local)
+    if a.remote_sql:
+        remote = sqlite3.connect(":memory:")
+        remote.executescript(Path(a.remote_sql).read_text(encoding="utf-8"))
+    else:
+        remote = sqlite3.connect(a.remote_db)
+    stmts, rep = delta(local, remote)
+    rep["total_sentencias"] = len(stmts)
+    if rep["sentencias_grandes"]:
+        print(json.dumps(rep, ensure_ascii=False, indent=2))
+        sys.exit("Hay sentencias de más de 100 KB (límite de D1). No se generó el archivo.")
+    if stmts:
+        SEED_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(TZ).strftime("%Y%m%d-%H%M%S")
+        out = Path(a.out) if a.out else SEED_DIR / f"delta-{stamp}.sql"
+        header = (f"-- Delta local → D1 generado por scripts/d1_migrate.py el {datetime.now(TZ).isoformat(timespec='seconds')}\n"
+                  f"-- Solo altas (INSERT): si D1 cambió desde la exportación, la ejecución falla completa y no aplica nada.\n"
+                  f"-- Contiene datos de contacto: NO versionar.\n")
+        out.write_text(header + "\n".join(stmts) + "\n", encoding="utf-8")
+        rep["archivo"] = str(out.relative_to(REPO)) if out.is_relative_to(REPO) else str(out)
+    else:
+        rep["archivo"] = None
+    print(json.dumps(rep, ensure_ascii=False, indent=2))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -232,8 +325,11 @@ def main():
     c = sub.add_parser("apply-local"); c.add_argument("--db")
     c = sub.add_parser("reconcile"); c.add_argument("--db", required=True)
     c = sub.add_parser("export-csv"); c.add_argument("--db"); c.add_argument("--sql"); c.add_argument("--out", required=True)
+    c = sub.add_parser("delta"); g = c.add_mutually_exclusive_group(required=True)
+    g.add_argument("--remote-sql"); g.add_argument("--remote-db"); c.add_argument("--out")
     a = ap.parse_args()
-    {"build-seed": cmd_build_seed, "apply-local": cmd_apply_local, "reconcile": cmd_reconcile, "export-csv": cmd_export_csv}[a.cmd](a)
+    {"build-seed": cmd_build_seed, "apply-local": cmd_apply_local, "reconcile": cmd_reconcile, "export-csv": cmd_export_csv,
+     "delta": cmd_delta}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -33,9 +33,11 @@ class MigrationReal(unittest.TestCase):
     def test_pilot_preserved(self):
         db = sqlite3.connect(self.db)
         rows = dict(db.execute("SELECT lead_id, nombre_negocio || '|' || clasificacion || '|' || puntaje_total FROM leads").fetchall())
-        self.assertEqual(rows, {"WW-20261111-001": "Clínica Dental Aiteli|B|52", "WW-20261111-002": "Clínica Dental Biodental|B|52",
-                                "WW-20261111-003": "Oral Health|B|58", "WW-20261111-004": "Jauckens & Castillo Dental|C|48"})
-        self.assertEqual(db.execute("SELECT COUNT(*) FROM documents WHERE kind='borrador'").fetchone()[0], 4)
+        piloto = {"WW-20261111-001": "Clínica Dental Aiteli|B|52", "WW-20261111-002": "Clínica Dental Biodental|B|52",
+                  "WW-20261111-003": "Oral Health|B|58", "WW-20261111-004": "Jauckens & Castillo Dental|C|48"}
+        self.assertEqual({k: rows.get(k) for k in piloto}, piloto)  # el piloto se conserva; el CRM puede crecer
+        borradores = {r[0] for r in db.execute("SELECT path FROM documents WHERE kind='borrador'")}
+        self.assertTrue({f"data/outreach/WW-20261111-00{i}-{s}.md" for i, s in ((1, "inicial"), (2, "inicial"), (3, "inicial"), (4, "referencia"))} <= borradores)
 
     def test_round_trip_csv(self):
         out = self.tmp / "rt"
@@ -79,6 +81,78 @@ class MigrationDemo(unittest.TestCase):
                 c.execute("DELETE FROM suppression")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class SyncDelta(unittest.TestCase):
+    """delta: solo altas locales que faltan en D1; conflictos reportados y nunca emitidos; carga válida en D1."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="ww-delta-"))
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def delta(self, remote, name):
+        out = self.tmp / f"{name}.sql"
+        r = run("delta", "--remote-db", str(remote), "--out", str(out))
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        return json.loads(r.stdout), out
+
+    def full_remote(self, name):
+        db = self.tmp / f"{name}.sqlite"
+        r = run("apply-local", "--db", str(db))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return db
+
+    def empty_remote(self, name):
+        path = self.tmp / f"{name}.sqlite"
+        db = sqlite3.connect(path)
+        for m in sorted((REPO / "cloudflare" / "migrations").glob("*.sql")):
+            db.executescript(m.read_text(encoding="utf-8"))
+        db.close()
+        return path
+
+    def test_sin_cambios_no_genera_nada(self):
+        rep, out = self.delta(self.full_remote("igual"), "igual")
+        self.assertEqual(rep["total_sentencias"], 0, rep)
+        self.assertEqual(rep["conflictos"], [])
+        self.assertIsNone(rep["archivo"])
+        self.assertFalse(out.exists())
+
+    def test_d1_vacia_recibe_todo_y_cuadra_con_los_csv(self):
+        remote = self.empty_remote("vacia")
+        rep, out = self.delta(remote, "vacia")
+        with open(REPO / "data" / "crm" / "leads.csv", encoding="utf-8") as fh:
+            csv_leads = len(list(csv.DictReader(fh)))
+        self.assertEqual(rep["insertar"]["leads"], csv_leads)
+        # Carga como en D1: llaves foráneas activas y límite de patrones de 50 caracteres
+        db = sqlite3.connect(remote, isolation_level=None)
+        db.execute("PRAGMA foreign_keys = ON")
+        db.setlimit(sqlite3.SQLITE_LIMIT_LIKE_PATTERN_LENGTH, 50)
+        db.executescript("BEGIN;" + out.read_text(encoding="utf-8") + "COMMIT;")
+        db.close()
+        rec = run("reconcile", "--db", str(remote))
+        diffs = [d for d in json.loads(rec.stdout)["diferencias"] if d.get("tabla") != "audit_log"]
+        self.assertEqual(diffs, [], rec.stdout)  # audit_log no se sincroniza: cada entorno lleva el suyo
+        # Segunda aplicación: falla completa (sin duplicados)
+        db = sqlite3.connect(remote, isolation_level=None)
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.executescript("BEGIN;" + out.read_text(encoding="utf-8") + "COMMIT;")
+        db.execute("ROLLBACK") if db.in_transaction else None
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM leads").fetchone()[0], csv_leads)
+
+    def test_conflicto_se_reporta_y_gana_d1(self):
+        remote = self.full_remote("conflicto")
+        db = sqlite3.connect(remote)
+        lead = db.execute("SELECT lead_id FROM leads WHERE opt_out='false' ORDER BY lead_id LIMIT 1").fetchone()[0]
+        db.execute("UPDATE leads SET notas = notas || ' (editado en el dashboard)' WHERE lead_id = ?", (lead,))
+        db.execute("INSERT INTO audit_log (ts,evento,actor,entidad,entorno,detalle) VALUES ('2099-01-01','auth.login','x','x','real','{}')")
+        db.commit(); db.close()
+        rep, out = self.delta(remote, "conflicto")
+        self.assertEqual(rep["total_sentencias"], 0, rep)
+        self.assertEqual([(c["tabla"], c["clave"], c["campos"]) for c in rep["conflictos"]], [("leads", lead, ["notas"])])
 
 
 class D1Compat(unittest.TestCase):

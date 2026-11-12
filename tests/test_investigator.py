@@ -124,8 +124,11 @@ class EndToEnd(unittest.TestCase):
             self.assertIn("Consultorio OSM Con Sitio", nombres)
             c1 = next(c for c in rev if c["nombre_negocio"] == "Consultorio OSM Con Sitio")
             self.assertTrue(any(e["senal"] == "WEB_BROKEN" and e["confianza"] == "alta" for e in c1["evidencias"]))
-            leads_before = len(req("GET", "/api/leads", headers=ck)[1]["leads"])
-            self.assertEqual(leads_before, 4, "nada se registra sin revisión humana")
+            import csv as _csv
+            with open(REPO / "data" / "crm" / "leads.csv", encoding="utf-8") as fh:
+                en_crm = len(list(_csv.DictReader(fh)))  # la base de prueba se creó desde estos CSV
+            leads_after = len(req("GET", "/api/leads", headers=ck)[1]["leads"])
+            self.assertEqual(leads_after, en_crm, "nada se registra sin revisión humana")
         finally:
             p.terminate(); p.wait(5)
             for s in (p.stdout, p.stderr):

@@ -16,8 +16,12 @@ test("los 4 prospectos originales están en D1 con identidad, clase y puntaje", 
   const { call } = await setup({ seed: "real" });
   const s = await loginAs(call);
   const { body } = await s.get("/api/leads");
-  assert.equal(body.leads.length, 4);
-  for (const L of body.leads) assert.deepEqual([L.nombre_negocio, L.clasificacion, +L.puntaje_total], PILOT[L.lead_id]);
+  const crm = parseCsv(readFileSync(join(REPO, "data", "crm", "leads.csv"), "utf8")).length - 1;
+  assert.equal(body.leads.length, crm);  // D1 refleja el CRM completo; el piloto se conserva intacto
+  for (const id of Object.keys(PILOT)) {
+    const L = body.leads.find((x) => x.lead_id === id);
+    assert.deepEqual([L.nombre_negocio, L.clasificacion, +L.puntaje_total], PILOT[id]);
+  }
   const d = await s.get("/api/leads/WW-20261111-001");
   assert.ok(d.body.dossier.includes("Aiteli")); assert.ok(d.body.evidencia.evidencias.length >= 1); assert.ok(d.body.borradores.length >= 1);
   assert.equal(d.body.borradores[0].meta.version, "2");
@@ -118,5 +122,6 @@ test("persistencia: los datos sobreviven al reabrir la base (archivo)", async ()
   e1.DB.db.exec(readFileSync(join(REPO, "cloudflare", "seed", "seed_real.sql"), "utf8"));
   e1.DB.close();
   const e2 = makeEnv({ dbPath: path, vars: {} });
-  assert.equal((await e2.DB.prepare("SELECT COUNT(*) n FROM leads").first()).n, 4);
+  const crm = parseCsv(readFileSync(join(REPO, "data", "crm", "leads.csv"), "utf8")).length - 1;
+  assert.equal((await e2.DB.prepare("SELECT COUNT(*) n FROM leads").first()).n, crm);
 });

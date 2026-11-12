@@ -51,6 +51,19 @@ Todos los comandos desde `cloudflare/`.
 4. Recomendado: Cloudflare Access (Zero Trust, gratis hasta 50 usuarios) delante del dominio; define `CF_ACCESS_TEAM_DOMAIN` y `CF_ACCESS_AUD` y el Worker validará el JWT.
 5. Más adelante: activar DNSSEC en Cloudflare y publicar el DS en Namecheap.
 
+## Sincronizar el CRM local con D1 (solo altas)
+D1 es la fuente principal. El pipeline local (`crm_tool.py`, CSV) registra leads nuevos; para que aparezcan en `sales.webwizards.click`:
+
+1. **Exportar D1** (lectura; lo hace una persona, desde `cloudflare/`):
+   `mkdir -p ../data/exports && npx wrangler d1 export ww-sales --remote --output ../data/exports/d1-remote.sql`
+2. **Calcular el delta** (desde la raíz): `python3 scripts/d1_migrate.py delta --remote-sql data/exports/d1-remote.sql`
+   - Emite solo `INSERT` de lo que existe en local y falta en D1 → `cloudflare/seed/delta-<fecha>.sql` (no versionado).
+   - **Conflictos** (misma clave, contenido distinto, p. ej. un lead aprobado en el dashboard): se reportan y **no** se emiten; gana D1.
+   - **Solo en D1** (cambios hechos en el dashboard): se reportan. Las **bajas** que aparezcan ahí se aplican de inmediato en local con `crm_tool.py suppress`.
+   - `audit_log` no se sincroniza: cada entorno lleva su propia auditoría. Documentos con cambios entran como versión nueva.
+3. **Aplicar** (una persona, desde `cloudflare/`): `npx wrangler d1 execute ww-sales --remote --file seed/delta-<fecha>.sql`. Si D1 cambió desde la exportación, falla completo y no aplica nada: repetir desde el paso 1.
+4. **Verificar:** repetir 1–2; el delta debe salir vacío.
+
 ## Verificación tras desplegar
 - `GET /api/health` → `200 {"ok":true,"version":…,"servicio":"ww-sales"}`.
 - `GET /api/session` y `GET /api/leads` sin sesión → `401`.
