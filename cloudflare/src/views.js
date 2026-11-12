@@ -4,18 +4,21 @@ import { FINALS, TRANSITIONS, STATES, HEADERS, SCHEMA, nowIso, todayIso, mxHolid
 import { candidateChecks, isBlocked } from "./crm.js";
 
 const NEXT = { calificado: "Preparar borrador", mensaje_borrador: "Revisión de cumplimiento", pendiente_aprobacion: "Aprobar o pedir cambios",
-  aprobado: "Enviar (persona) y registrar envío", contactado: "Seguimiento", en_conversacion: "Responder", reunion_agendada: "Reunión",
-  propuesta_enviada: "Dar seguimiento a propuesta", pausado: "Retomar en la fecha pedida" };
+  aprobado: "Enviar (persona) y registrar envío", contactado: "Seguimiento", en_conversacion: "Responder", interesado: "Proponer demostración",
+  reunion_agendada: "Hacer la demostración", demo_realizada: "Enviar propuesta", propuesta_enviada: "Dar seguimiento a propuesta",
+  negociacion: "Cerrar condiciones", pausado: "Retomar en la fecha pedida" };
+export const ACTIVE = new Set(SCHEMA["x-estados-con-seguimiento"]);
 export function nextAction(L) {
   if (FINALS.includes(L.estado_pipeline)) return "—";
   if (L.estado_pipeline === "calificado" && L.clasificacion === "C") return "Sin mensaje (clase C)";
-  const a = NEXT[L.estado_pipeline] || "—";
+  const a = L.proxima_accion || NEXT[L.estado_pipeline] || "—";  // la acción concreta capturada por una persona tiene prioridad
   return L.proximo_seguimiento ? `${a} · ${L.proximo_seguimiento}` : a;
 }
 const S = (v) => (v == null ? "" : String(v));
 export function leadSummary(L) {
   const keys = ["lead_id", "nombre_negocio", "nicho", "subnicho", "ciudad", "estado_mx", "sitio_web", "telefono_publico", "whatsapp_publico", "email_publico",
-    "puntaje_total", "clasificacion", "estado_pipeline", "fecha_registro", "fecha_fuente", "proximo_seguimiento", "aprobacion_estado", "fuente", "opt_out", "canal_preferido"];
+    "puntaje_total", "clasificacion", "estado_pipeline", "fecha_registro", "fecha_fuente", "proximo_seguimiento", "aprobacion_estado", "fuente", "opt_out", "canal_preferido",
+    "motivo_perdida", "fecha_demo", "fecha_propuesta", "monto_implementacion", "monto_mensual"];
   return { ...Object.fromEntries(keys.map((k) => [k, S(L[k])])), proxima_accion: nextAction(L) };
 }
 const counter = (arr, f) => arr.reduce((m, x) => ((m[f(x)] = (m[f(x)] || 0) + 1), m), {});
@@ -30,10 +33,10 @@ export async function summary(env) {
   const leads = await all(env, "SELECT * FROM leads");
   const ints = await all(env, "SELECT lead_id, direccion, tipo FROM interactions");
   const ab = leads.filter((L) => ["A", "B"].includes(L.clasificacion));
-  const contactedStates = new Set(["contactado", "en_conversacion", "reunion_agendada", "propuesta_enviada", "ganado", "perdido", "pausado"]);
+  const contactedStates = new Set([...ACTIVE, "ganado", "perdido"]);
   const contactados = leads.filter((L) => L.fecha_primer_contacto || contactedStates.has(L.estado_pipeline));
   const respuestas = ints.filter((i) => i.direccion === "entrante");
-  const reuniones = new Set([...leads.filter((L) => ["reunion_agendada", "propuesta_enviada", "ganado"].includes(L.estado_pipeline)).map((L) => L.lead_id),
+  const reuniones = new Set([...leads.filter((L) => ["reunion_agendada", "demo_realizada", "propuesta_enviada", "negociacion", "ganado"].includes(L.estado_pipeline)).map((L) => L.lead_id),
     ...ints.filter((i) => i.tipo === "reunion").map((i) => i.lead_id)]);
   const ganados = leads.filter((L) => L.estado_pipeline === "ganado");
   const cands = await all(env, "SELECT estado, COUNT(*) n FROM candidates GROUP BY estado");
@@ -132,7 +135,8 @@ export async function followups(env) {
 export async function reports(env) {
   const leads = await all(env, "SELECT * FROM leads");
   const group = (k) => leads.reduce((g, L) => { const key = L[k] || "—"; g[key] ||= { total: 0, A: 0, B: 0, C: 0, descartado: 0 }; g[key].total++; g[key][L.clasificacion]++; return g; }, {});
-  const order = ["calificado", "mensaje_borrador", "pendiente_aprobacion", "aprobado", "contactado", "en_conversacion", "reunion_agendada", "propuesta_enviada", "ganado"];
+  const order = ["calificado", "mensaje_borrador", "pendiente_aprobacion", "aprobado", "contactado", "en_conversacion", "interesado", "reunion_agendada",
+    "demo_realizada", "propuesta_enviada", "negociacion", "ganado"];
   const hist = await all(env, "SELECT lead_id, resumen FROM interactions WHERE tipo='cambio_estado'");
   const reached = {};
   for (const L of leads) {
@@ -182,7 +186,30 @@ export async function config(env, POLICIES, APPROVAL_RULES) {
 }
 
 export async function pipeline(env) {
-  return { estados: STATES, transiciones: TRANSITIONS, finales: FINALS, leads: (await all(env, "SELECT * FROM leads")).map(leadSummary) };
+  return { estados: STATES, transiciones: TRANSITIONS, finales: FINALS, con_seguimiento: [...ACTIVE], motivos_perdida: SCHEMA.$defs.motivoPerdida.enum,
+    leads: (await all(env, "SELECT * FROM leads")).map(leadSummary) };
+}
+
+// "Hoy": lo que una persona debe hacer hoy, para que ningún prospecto activo quede olvidado.
+export function todayView(leads, fus, today, in7) {
+  const S2 = (L) => ({ ...leadSummary(L), accion: L.proxima_accion || NEXT[L.estado_pipeline] || "", fecha: L.proximo_seguimiento });
+  const live = leads.filter((L) => !FINALS.includes(L.estado_pipeline) && L.opt_out !== "true");
+  const byFecha = (a, b) => (a.fecha || "").localeCompare(b.fecha || "");
+  const nombre = Object.fromEntries(leads.map((L) => [L.lead_id, L.nombre_negocio]));
+  return {
+    hoy: today,
+    acciones: live.filter((L) => L.proximo_seguimiento && L.proximo_seguimiento <= today).map((L) => ({ ...S2(L), vencido: L.proximo_seguimiento < today })).sort(byFecha),
+    sin_accion: live.filter((L) => ACTIVE.has(L.estado_pipeline) && (!L.proxima_accion || !L.proximo_seguimiento)).map(S2),
+    por_enviar: live.filter((L) => L.estado_pipeline === "aprobado").map(S2),
+    por_aprobar: live.filter((L) => L.estado_pipeline === "pendiente_aprobacion").map(S2),
+    proximos: live.filter((L) => L.proximo_seguimiento > today && L.proximo_seguimiento <= in7).map(S2).sort(byFecha),
+    seguimientos: fus.filter((f) => !["enviado", "cancelado"].includes(f.estado) && f.fecha_programada <= today)
+      .map((f) => ({ ...f, negocio: nombre[f.lead_id] || "", vencido: f.fecha_programada < today })),
+  };
+}
+export async function today(env) {
+  const t = todayIso(), d = new Date(`${t}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 7);
+  return todayView(await all(env, "SELECT * FROM leads"), await all(env, "SELECT * FROM followups"), t, d.toISOString().slice(0, 10));
 }
 
 export function toCsv(headers, rows) {

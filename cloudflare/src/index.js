@@ -106,7 +106,7 @@ async function handle(req, env, ctx) {
 async function getRoutes(env, path, url, s) {
   if (path === "/api/session") return json(200, { token: s.csrf, entorno: env.WW_ENTORNO || "real", version: VERSION, backend: "worker", usuario: s.usuario, nombre: s.nombre });
   const simple = { "/api/summary": views.summary, "/api/pipeline": views.pipeline, "/api/drafts": views.drafts, "/api/research": views.research,
-    "/api/followups": views.followups, "/api/reports": views.reports, "/api/config": (e) => views.config(e, POLICIES, APPROVAL_RULES),
+    "/api/followups": views.followups, "/api/today": views.today, "/api/reports": views.reports, "/api/config": (e) => views.config(e, POLICIES, APPROVAL_RULES),
     "/api/leads": async (e) => ({ leads: (await all(e, "SELECT * FROM leads ORDER BY lead_id")).map(views.leadSummary) }),
     "/api/prospecting": async (e) => ({ solicitudes: await Promise.all((await all(e, "SELECT id FROM research_requests ORDER BY id DESC LIMIT 50")).map((r) => engine.getRequest(e, r.id))),
       denue: !!e.DENUE_TOKEN, investigador: !!e.WORKER_TOKEN }) };
@@ -141,14 +141,25 @@ async function events(env, url) {
 }
 
 async function postRoutes(env, path, b, s, actor) {
-  let m = path.match(new RegExp(`^/api/leads/${LEAD}/(transition|approve|request-changes|interaction|optout|draft)$`));
+  let m = path.match(new RegExp(`^/api/leads/${LEAD}/(transition|approve|request-changes|interaction|optout|draft|next)$`));
   if (m) {
     const [, id, op] = m;
+    const commercial = (ch) => {  // campos del pipeline comercial que una persona captura al mover o editar el lead
+      for (const [k, n] of [["proxima_accion", 300], ["motivo_perdida", 40], ["fecha_demo", 10], ["fecha_propuesta", 10], ["monto_implementacion", 12], ["monto_mensual", 12]])
+        if (b[k] !== undefined && b[k] !== null && String(b[k]).trim() !== "") ch[k] = str(b[k], n);
+      return ch;
+    };
+    if (op === "next") {
+      const ch = commercial({});
+      if (b.proximo_seguimiento) ch.proximo_seguimiento = str(b.proximo_seguimiento, 10);
+      if (!Object.keys(ch).length) throw new CRMError("Nada que actualizar.");
+      return crm.updateLead(env, id, ch, actor, str(b.nota));
+    }
     if (op === "transition") {
       const to = str(b.to, 40);
       if (to === "no_contactar") throw new CRMError("Para dar de baja usa la acción «Registrar baja».");
       if (to === "aprobado") throw new CRMError("Para aprobar usa el botón «Aprobar para uso humano».");
-      const ch = { estado_pipeline: to };
+      const ch = commercial({ estado_pipeline: to });
       if (b.proximo_seguimiento) ch.proximo_seguimiento = str(b.proximo_seguimiento, 10);
       if (to === "pendiente_aprobacion") { ch.aprobacion_estado = "pendiente"; const d = await first(env, "SELECT path FROM documents WHERE lead_id=? AND kind='borrador' ORDER BY path LIMIT 1", id); if (d) ch.mensaje_inicial_id = d.path; }
       return crm.updateLead(env, id, ch, actor, str(b.nota));

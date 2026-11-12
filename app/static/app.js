@@ -3,12 +3,16 @@
 const $ = (s, el = document) => el.querySelector(s);
 const STATE_LABEL = {
   calificado: "Calificado", descartado: "Descartado", mensaje_borrador: "Borrador", pendiente_aprobacion: "Pendiente de aprobación",
-  aprobado: "Aprobado (uso humano)", contactado: "Contactado", en_conversacion: "En conversación", reunion_agendada: "Reunión agendada",
-  propuesta_enviada: "Propuesta enviada", ganado: "Ganado", perdido: "Perdido", pausado: "Pausado", no_contactar: "No contactar",
+  aprobado: "Aprobado (uso humano)", contactado: "Primer contacto", en_conversacion: "Respondió", interesado: "Interesado",
+  reunion_agendada: "Demo programada", demo_realizada: "Demo realizada", propuesta_enviada: "Propuesta enviada", negociacion: "Negociación",
+  ganado: "Ganado", perdido: "Perdido", pausado: "Seguimiento futuro", no_contactar: "No contactar",
 };
 const NICHO = { dentista: "Clínica dental", clinica: "Consultorio médico", estetica_spa: "Estética / spa", veterinaria: "Veterinaria", otro: "Otro" };
-const NEEDS_DATE = new Set(["contactado", "en_conversacion", "reunion_agendada", "propuesta_enviada", "pausado"]);
+const MOTIVO = { sin_respuesta: "Sin respuesta", no_interesado: "No interesado", precio: "Precio", sin_presupuesto: "Sin presupuesto",
+  ya_tiene_proveedor: "Ya tiene proveedor", no_es_momento: "No es el momento", fuera_de_perfil: "Fuera de perfil", otro: "Otro" };
+let NEEDS_DATE = new Set(["contactado", "en_conversacion", "interesado", "reunion_agendada", "demo_realizada", "propuesta_enviada", "negociacion", "pausado"]);
 let SESSION = null, FINALS = [];
+const todayStr = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
 
 // ---------------------------------------------------------------- utilidades
 function h(tag, attrs = {}, ...kids) {
@@ -140,13 +144,30 @@ async function askName() {
 }
 
 // ---------------------------------------------------------------- acciones de lead (comparten validación con crm_tool.py)
+const MONEY = { placeholder: "Ej. 6000 (MXN, sin comas)" };
 async function moveLead(L, to, after) {
   const fields = [];
-  if (NEEDS_DATE.has(to)) fields.push({ name: "fecha", label: "Próxima acción (día hábil; domingos y festivos se rechazan)", type: "date", required: true });
+  if (to === "perdido") fields.push({ name: "motivo_perdida", label: "Motivo de pérdida", type: "select", options: Object.entries(MOTIVO).map(([value, label]) => ({ value, label })) });
+  if (to === "demo_realizada") fields.push({ name: "fecha_demo", label: "Fecha de la demostración", type: "date", required: true, value: L.fecha_demo || todayStr() });
+  if (to === "propuesta_enviada" || to === "negociacion") fields.push({ name: "fecha_propuesta", label: "Fecha en que se envió la propuesta", type: "date", required: true, value: L.fecha_propuesta || todayStr() },
+    { name: "monto_implementacion", label: "Implementación propuesta (MXN, opcional)", ...MONEY, value: L.monto_implementacion || "" },
+    { name: "monto_mensual", label: "Mensualidad propuesta (MXN, opcional)", ...MONEY, value: L.monto_mensual || "" });
+  if (NEEDS_DATE.has(to)) fields.push({ name: "proxima_accion", label: "Próxima acción concreta", placeholder: "Ej. Llamar para confirmar la demo", required: true },
+    { name: "fecha", label: "Fecha de la próxima acción (día hábil; domingos y festivos se rechazan)", type: "date", required: true });
   fields.push({ name: "nota", label: "Nota (opcional)", type: "textarea" });
   const r = await modal({ title: `Mover a «${STATE_LABEL[to]}»`, text: `${L.nombre_negocio} · ${STATE_LABEL[L.estado_pipeline]} → ${STATE_LABEL[to]}. Solo se permiten transiciones válidas del esquema.`, fields, confirm: "Mover" });
   if (!r) return;
-  try { await api(`/api/leads/${L.lead_id}/transition`, { to, nota: r.nota, proximo_seguimiento: r.fecha }); toast("Estado actualizado y auditado.", "ok"); after(); }
+  const { fecha, nota, ...extra } = r;
+  try { await api(`/api/leads/${L.lead_id}/transition`, { to, nota, proximo_seguimiento: fecha, ...extra }); toast("Estado actualizado y auditado.", "ok"); after(); }
+  catch (e) { toast(e.message, "bad"); }
+}
+async function editNext(L, after) {
+  const r = await modal({ title: "Próxima acción", text: `${L.nombre_negocio}: qué sigue y cuándo. Evita contactos olvidados.`,
+    fields: [{ name: "proxima_accion", label: "Próxima acción concreta", required: true, value: L.proxima_accion || "", placeholder: "Ej. Enviar propuesta con alcance de recordatorios" },
+      { name: "fecha", label: "Fecha (día hábil)", type: "date", required: true, value: L.proximo_seguimiento || "" },
+      { name: "nota", label: "Nota (opcional)", type: "textarea" }], confirm: "Guardar" });
+  if (!r) return;
+  try { await api(`/api/leads/${L.lead_id}/next`, { proxima_accion: r.proxima_accion, proximo_seguimiento: r.fecha, nota: r.nota }); toast("Próxima acción guardada.", "ok"); after(); }
   catch (e) { toast(e.message, "bad"); }
 }
 async function approveLead(L, after) {
@@ -283,7 +304,12 @@ async function leadDetail(v, id) {
       h("div", { class: "card" }, h("h3", {}, "Calificación"), kv([["Puntaje", `${L.puntaje_total}/100 (ICP ${L.puntaje_icp} · Oportunidad ${L.puntaje_oportunidad} · Contacto ${L.puntaje_contacto} · Capacidad ${L.puntaje_capacidad})`],
         ["Clase", badgeClass(L.clasificacion)], ["Motivo", L.motivo_clasificacion], ["Señales", L.senales_oportunidad.split(";").filter(Boolean).map((x) => h("span", { class: "badge accent", style: "margin:0 4px 4px 0" }, x))],
         ["Servicio propuesto", L.servicio_recomendado.replaceAll(";", ", ")], ["Canal preferido", L.canal_preferido], ["Estado", stateEl(L.estado_pipeline)], ["Aprobación", L.aprobacion_estado + (L.aprobado_por ? ` · ${L.aprobado_por}` : "")],
-        ["Próxima acción", d.proxima_accion]]))));
+        ["Próxima acción", d.proxima_accion]]))),
+      h("div", { class: "card", style: "margin-top:16px" }, h("h3", {}, "Seguimiento comercial"), kv([
+        ["Próxima acción", L.proxima_accion ? `${L.proxima_accion}${L.proximo_seguimiento ? ` · ${L.proximo_seguimiento}` : ""}` : (NEEDS_DATE.has(L.estado_pipeline) ? h("span", { class: "badge bad" }, "Falta definirla") : "")],
+        ["Demostración", L.fecha_demo || h("span", { class: "faint" }, "Sin registrar")],
+        ["Propuesta", L.fecha_propuesta ? [L.fecha_propuesta, L.monto_implementacion ? ` · implementación $${L.monto_implementacion}` : "", L.monto_mensual ? ` · mensual $${L.monto_mensual}` : ""].join("") : h("span", { class: "faint" }, "Sin registrar")],
+        ["Motivo de pérdida", L.motivo_perdida ? MOTIVO[L.motivo_perdida] || L.motivo_perdida : undefined]])));
     if (tab === "Investigación") pane.append(evidenceCard(d.evidencia, L), h("div", { class: "card", style: "margin-top:16px" }, h("h3", {}, "Dossier"), d.dossier ? md(d.dossier) : h("div", { class: "empty" }, "Sin dossier.")));
     if (tab === "Mensajes") pane.append(d.borradores.length ? h("div", { class: "stack" }, d.borradores.map((b) => draftCard(b, L, reload, true))) : h("div", { class: "card empty" }, "Sin borradores para este prospecto."));
     if (tab === "Historial") pane.append(h("div", { class: "grid cols-2" },
@@ -293,6 +319,7 @@ async function leadDetail(v, id) {
   const actions = d.bloqueado ? h("div", { class: "notice bad" }, "Dado de baja / no contactar. El sistema impide cualquier cambio o reactivación.")
     : h("div", { class: "row" }, transitionSelect(L, d.transiciones, reload),
       L.estado_pipeline === "pendiente_aprobacion" ? [h("button", { class: "btn primary", onclick: () => approveLead(L, reload) }, "Aprobar para uso humano"), h("button", { class: "btn", onclick: () => requestChanges(L, reload) }, "Pedir cambios")] : null,
+      FINALS.includes(L.estado_pipeline) ? null : h("button", { class: "btn", onclick: () => editNext(L, reload) }, "Próxima acción"),
       h("button", { class: "btn", onclick: () => logInteraction(L, reload) }, "Registrar interacción"),
       h("button", { class: "btn danger", onclick: () => optOut(L, reload) }, "Registrar baja"));
   v.append(h("div", { class: "page-head" }, h("div", {}, h("a", { href: "#/prospectos", class: "muted" }, "← Prospectos"), h("h1", {}, L.nombre_negocio),
@@ -380,6 +407,29 @@ views.mensajes = async (v) => {
   v.append(h("div", { class: "page-head" }, h("div", {}, h("h1", {}, "Mensajes"), h("p", {}, "Borradores personalizados. Copiar y aprobar nunca envía nada."))),
     h("div", { class: "notice safe", style: "margin-bottom:16px" }, "Aprobar marca el borrador como listo para que una persona lo envíe desde su propia cuenta, el día hábil indicado. No hay ningún mecanismo de envío conectado."),
     borradores.length ? h("div", { class: "stack" }, borradores.map((b) => draftCard(b, b.lead, reload))) : h("div", { class: "card empty" }, "No hay borradores."));
+};
+
+views.hoy = async (v) => {
+  const t = await api("/api/today"); const reload = () => route();
+  const go = (id) => () => (location.hash = `#/prospectos/${id}`);
+  const list = (title, items, sub, empty, cls = "") => h("div", { class: "card" }, h("h3", {}, `${title} (${items.length})`),
+    items.length ? h("div", { class: "stack" }, items.map((x) => h("div", { class: "row", style: "justify-content:space-between;border-bottom:1px solid var(--border);padding:8px 0;cursor:pointer", onclick: go(x.lead_id) },
+      h("div", {}, h("strong", {}, x.nombre_negocio || x.negocio), " ", x.estado_pipeline ? stateEl(x.estado_pipeline) : null, h("div", { class: "faint", style: "font-size:12px" }, sub(x))),
+      x.vencido ? h("span", { class: "badge bad" }, "vencido") : cls && x.fecha ? h("span", { class: `badge ${cls}` }, x.fecha) : null)))
+      : h("div", { class: "empty" }, empty));
+  const total = t.acciones.length + t.seguimientos.length + t.por_enviar.length + t.por_aprobar.length + t.sin_accion.length;
+  v.append(h("div", { class: "page-head" }, h("div", {}, h("h1", {}, `Hoy · ${t.hoy}`), h("p", {}, total ? "Lo que toca hacer hoy. Cada prospecto activo debe tener una próxima acción con fecha." : "Nada pendiente para hoy."))),
+    h("div", { class: "grid cols-2" },
+      list("Acciones de hoy y vencidas", t.acciones, (x) => `${x.accion || "Sin acción"} · ${x.fecha}`, "Ninguna acción para hoy."),
+      list("Seguimientos que tocan hoy", t.seguimientos, (f) => `FU${f.numero_seguimiento} por ${f.canal} · ${f.fecha_programada}`, "Ningún seguimiento para hoy.")),
+    h("div", { class: "grid cols-3", style: "margin-top:16px" },
+      list("Aprobados por enviar (persona)", t.por_enviar, (x) => `Canal: ${x.canal_preferido || "—"} · revisa las condiciones del borrador antes de enviar`, "Ninguno.", "ok"),
+      list("Pendientes de tu aprobación", t.por_aprobar, (x) => `Clase ${x.clasificacion} · ${x.puntaje_total} pts`, "Ninguno.", "warn"),
+      list("Activos sin próxima acción", t.sin_accion, () => "Define qué sigue y cuándo", "Todos tienen próxima acción.", "bad")),
+    h("div", { class: "card", style: "margin-top:16px" }, h("h3", {}, `Próximos 7 días (${t.proximos.length})`),
+      t.proximos.length ? h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, ["Fecha", "Prospecto", "Estado", "Acción"].map((c) => h("th", {}, c)))),
+        h("tbody", {}, t.proximos.map((x) => h("tr", { onclick: go(x.lead_id) }, h("td", {}, x.fecha), h("td", {}, x.nombre_negocio), h("td", {}, stateEl(x.estado_pipeline)), h("td", { class: "muted" }, x.accion))))))
+        : h("div", { class: "empty" }, "Nada programado en los próximos 7 días.")));
 };
 
 views.seguimientos = async (v) => {
@@ -512,7 +562,7 @@ views.prospeccion = async (v) => {
 };
 
 // ---------------------------------------------------------------- router
-const TITLES = { prospeccion: "Prospección", dashboard: "Dashboard", prospectos: "Prospectos", pipeline: "Pipeline", investigacion: "Investigación", mensajes: "Mensajes", seguimientos: "Seguimientos", reportes: "Reportes", configuracion: "Configuración" };
+const TITLES = { hoy: "Hoy", prospeccion: "Prospección", dashboard: "Dashboard", prospectos: "Prospectos", pipeline: "Pipeline", investigacion: "Investigación", mensajes: "Mensajes", seguimientos: "Seguimientos", reportes: "Reportes", configuracion: "Configuración" };
 async function route() {
   const [, name = "dashboard", param] = (location.hash.replace(/^#\/?/, "#/").match(/^#\/([^/]*)\/?(.*)$/) || []);
   const key = views[name] ? name : "dashboard";
@@ -531,6 +581,7 @@ async function refreshCounts() {
   try {
     const s = await api("/api/summary");
     $("#c-leads").textContent = s.kpis.registrados; $("#c-review").textContent = s.kpis.en_revision || ""; $("#c-drafts").textContent = s.kpis.pendientes_aprobacion || "";
+    const t = await api("/api/today"); const n = t.acciones.length + t.seguimientos.length + t.por_enviar.length + t.sin_accion.length; $("#c-today").textContent = n || "";
   } catch {}
 }
 let LISTENERS = false;
@@ -539,6 +590,7 @@ async function init() {
   if (r.status === 401) return renderLogin();
   SESSION = await r.json();
   const p = await api("/api/pipeline"); FINALS = p.finales;
+  if (p.con_seguimiento) NEEDS_DATE = new Set(p.con_seguimiento);  // la fuente es el esquema (x-estados-con-seguimiento)
   const demo = SESSION.entorno === "demo";
   $("#env-badge").textContent = demo ? "DEMO" : "CRM real"; $("#env-badge").className = `badge ${demo ? "warn" : "ok"}`;
   if (demo) $("#banner").replaceChildren(h("div", { class: "banner demo" }, "MODO DEMOSTRACIÓN · datos ficticios en demo/ · no son prospectos reales"));

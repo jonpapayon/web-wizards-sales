@@ -736,6 +736,7 @@ def cmd_update_lead(schema, a):
                 raise CRMError("Recalificación incoherente:\n - " + "\n - ".join(q))
         if new in schema["x-estados-finales"]:
             L["proximo_seguimiento"] = ""
+            L["proxima_accion"] = ""
             cancel_followups(fus, L["lead_id"], f"lead pasó a {new}")
         if a.nota:
             L["notas"] = (L.get("notas", "") + f" | {datetime.now(TZ).date()} {a.nota}").strip(" |")
@@ -886,6 +887,7 @@ def cmd_suppress(schema, a):
             if a.motivo in ("opt_out", "solicitud_legal"):
                 L["opt_out"], L["fecha_opt_out"], L["estado_pipeline"] = "true", ts, "no_contactar"
             L["proximo_seguimiento"] = ""
+            L["proxima_accion"] = ""
             L["fecha_actualizacion"] = ts
             n = cancel_followups(fus, L["lead_id"], f"supresión ({a.motivo})")
             log_interaction(schema, ints, L["lead_id"], "opt_out" if a.motivo == "opt_out" else "cambio_estado",

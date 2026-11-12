@@ -57,7 +57,7 @@ export async function updateLead(env, leadId, changes, actor, nota = "", approve
   const M = { ...L, ...Object.fromEntries(Object.entries(changes).map(([k, v]) => [k, toCell(v)])) };
   const stmts = [];
   if (FINALS.includes(nw)) {
-    M.proximo_seguimiento = "";
+    M.proximo_seguimiento = ""; M.proxima_accion = "";
     stmts.push(q(env, `UPDATE followups SET estado='cancelado', completado_en=?, notas=trim(notas || ' | cancelado: lead pasó a ' || ?, ' |')
       WHERE lead_id=? AND estado NOT IN ('enviado','cancelado')`, nowIso(), nw, leadId));
   }
@@ -92,7 +92,7 @@ export async function suppressLead(env, leadId, motivo, fuente, actor) {
   if (!finalAlready) {
     const estado = FINALS.includes(L.estado_pipeline) && !["perdido", "descartado"].includes(L.estado_pipeline) ? L.estado_pipeline : "no_contactar";
     const optout = ["opt_out", "solicitud_legal"].includes(motivo);
-    stmts.push(q(env, `UPDATE leads SET estado_pipeline=?, opt_out=?, fecha_opt_out=?, proximo_seguimiento='', fecha_actualizacion=? WHERE lead_id=?`,
+    stmts.push(q(env, `UPDATE leads SET estado_pipeline=?, opt_out=?, fecha_opt_out=?, proximo_seguimiento='', proxima_accion='', fecha_actualizacion=? WHERE lead_id=?`,
       optout ? "no_contactar" : estado, optout ? "true" : L.opt_out, optout ? ts : L.fecha_opt_out, ts, leadId));
     stmts.push(q(env, `UPDATE followups SET estado='cancelado', completado_en=?, notas=trim(notas || ' | cancelado: supresión (' || ? || ')', ' |') WHERE lead_id=? AND estado NOT IN ('enviado','cancelado')`, ts, motivo, leadId));
     const [id] = await intIds(env, 1);

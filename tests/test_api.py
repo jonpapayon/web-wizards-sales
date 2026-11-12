@@ -54,6 +54,25 @@ class APITests(unittest.TestCase):
         s, d = self.srv.post(f"/api/leads/{lid}/transition", {"to": "no_contactar"})
         self.assertEqual(s, 422)
 
+    def test_pipeline_comercial_y_hoy(self):
+        s, d = self.srv.get("/api/today")
+        self.assertEqual(s, 200)
+        for k in ("hoy", "acciones", "sin_accion", "por_enviar", "por_aprobar", "proximos", "seguimientos"):
+            self.assertIn(k, d)
+        s, p = self.srv.get("/api/pipeline")
+        self.assertIn("interesado", p["estados"]); self.assertIn("precio", p["motivos_perdida"]); self.assertIn("negociacion", p["con_seguimiento"])
+        lid = next(L["lead_id"] for L in read_csv(self.root, "leads") if L["estado_pipeline"] == "contactado")
+        s, d = self.srv.post(f"/api/leads/{lid}/next", {"proxima_accion": "Llamar a recepción", "proximo_seguimiento": "2026-11-18", "por": "Ana Revisora"})
+        self.assertEqual(s, 200, d)
+        L = next(x for x in read_csv(self.root, "leads") if x["lead_id"] == lid)
+        self.assertEqual((L["proxima_accion"], L["proximo_seguimiento"]), ("Llamar a recepción", "2026-11-18"))
+        s, d = self.srv.post(f"/api/leads/{lid}/transition", {"to": "perdido", "por": "Ana Revisora"})
+        self.assertEqual(s, 422, "perdido sin motivo se rechaza")
+        s, d = self.srv.post(f"/api/leads/{lid}/transition", {"to": "perdido", "motivo_perdida": "sin_respuesta", "por": "Ana Revisora"})
+        self.assertEqual(s, 200, d)
+        L = next(x for x in read_csv(self.root, "leads") if x["lead_id"] == lid)
+        self.assertEqual((L["estado_pipeline"], L["motivo_perdida"], L["proxima_accion"]), ("perdido", "sin_respuesta", ""))
+
     def test_approval_requires_person_and_never_sends(self):
         lid = self.lead_id("Sonrisa")
         s, d = self.srv.post(f"/api/leads/{lid}/approve", {"aprobado_por": "claude"})

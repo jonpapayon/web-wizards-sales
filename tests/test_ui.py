@@ -75,7 +75,7 @@ class DemoUI(unittest.TestCase):
 
     def test_all_sections_render(self):
         with Server(self.root) as s:
-            expect = {"dashboard": "Objetivo diario", "prospectos": "DEMO Spa Luna", "pipeline": "Reunión agendada",
+            expect = {"hoy": "Activos sin próxima acción", "dashboard": "Objetivo diario", "prospectos": "DEMO Spa Luna", "pipeline": "Demo programada",
                       "investigacion": "Área de revisión", "mensajes": "Aprobar para uso humano", "seguimientos": "Próximas acciones",
                       "reportes": "Conversión por etapa", "configuracion": "Reglas de aprobación automática"}
             for route, text in expect.items():
@@ -109,7 +109,7 @@ class RenderWithoutBrowser(unittest.TestCase):
     def test_demo_all_sections(self):
         root = temp_root()
         try:
-            out = self.run_render(root, ["dashboard=Objetivo diario", "prospectos=DEMO Spa Luna", "pipeline=Reunión agendada",
+            out = self.run_render(root, ["hoy=Activos sin próxima acción", "dashboard=Objetivo diario", "prospectos=DEMO Spa Luna", "pipeline=Demo programada",
                                          "investigacion=Área de revisión", "mensajes=Copiar", "seguimientos=Próximas acciones",
                                          "reportes=Conversión por etapa", "configuracion=Reglas de aprobación automática"])
             self.assertIn("MODO DEMOSTRACIÓN", out)

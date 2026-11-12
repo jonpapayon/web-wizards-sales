@@ -137,3 +137,27 @@ test("IDs: el Worker numera en su rango (WW 500+, INT/FU 5000+) y no choca con e
     SELECT ?, lead_id, '2099-01-01', 'interno', 'interna', 'nota', 'local', 'humano', 'local' FROM leads LIMIT 1`).bind(`INT-${day}-4999`).run();
   assert.equal(await nextId(env, "INT", "interactions", "interaccion_id", 4), int, "los IDs locales (<5000) no mueven el contador del Worker");
 });
+
+test("pipeline comercial: perdido exige motivo, activos exigen próxima acción, /next y /api/today", async () => {
+  const { call } = await setup({ seed: "demo" });
+  const s = await loginAs(call);
+  const leads = (await s.get("/api/leads")).body.leads;
+  const L = leads.find((x) => x.estado_pipeline === "reunion_agendada");
+  assert.ok(L, "el demo tiene un lead con demo programada");
+  // demo realizada exige fecha_demo y próxima acción
+  assert.equal((await s.post(`/api/leads/${L.lead_id}/transition`, { to: "demo_realizada", proximo_seguimiento: "2026-11-18" })).status, 422);
+  const ok = await s.post(`/api/leads/${L.lead_id}/transition`, { to: "demo_realizada", fecha_demo: "2026-11-11", proxima_accion: "Enviar propuesta", proximo_seguimiento: "2026-11-18" });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  // perdido sin motivo se rechaza; con motivo se acepta y limpia la próxima acción
+  assert.equal((await s.post(`/api/leads/${L.lead_id}/transition`, { to: "perdido" })).status, 422);
+  assert.equal((await s.post(`/api/leads/${L.lead_id}/transition`, { to: "perdido", motivo_perdida: "precio" })).status, 200);
+  const d = (await s.get(`/api/leads/${L.lead_id}`)).body.lead;
+  assert.deepEqual([d.estado_pipeline, d.motivo_perdida, d.proxima_accion], ["perdido", "precio", ""]);
+  // /next actualiza la próxima acción de un lead activo
+  const C = leads.find((x) => x.estado_pipeline === "contactado");
+  assert.equal((await s.post(`/api/leads/${C.lead_id}/next`, { proxima_accion: "Llamar a recepción", proximo_seguimiento: "2026-11-18" })).status, 200);
+  assert.equal((await s.post(`/api/leads/${C.lead_id}/next`, {})).status, 422);
+  const t = (await s.get("/api/today")).body;
+  for (const k of ["hoy", "acciones", "sin_accion", "por_enviar", "por_aprobar", "proximos", "seguimientos"]) assert.ok(k in t, k);
+  assert.ok(![...t.acciones, ...t.proximos].some((x) => x.lead_id === L.lead_id), "un lead perdido no aparece en Hoy");
+});

@@ -110,9 +110,16 @@ def draft_files(lead_id=None):
 NEXT_ACTION = {
     "calificado": "Preparar borrador", "mensaje_borrador": "Revisión de cumplimiento",
     "pendiente_aprobacion": "Aprobar o pedir cambios", "aprobado": "Enviar (persona) y registrar envío",
-    "contactado": "Seguimiento", "en_conversacion": "Responder", "reunion_agendada": "Reunión",
-    "propuesta_enviada": "Dar seguimiento a propuesta", "pausado": "Retomar en la fecha pedida",
+    "contactado": "Seguimiento", "en_conversacion": "Responder", "interesado": "Proponer demostración",
+    "reunion_agendada": "Hacer la demostración", "demo_realizada": "Enviar propuesta",
+    "propuesta_enviada": "Dar seguimiento a propuesta", "negociacion": "Cerrar condiciones", "pausado": "Retomar en la fecha pedida",
 }
+def active_states():  # SCHEMA se carga al arrancar (main), no al importar
+    return set(SCHEMA["x-estados-con-seguimiento"])
+
+
+COMMERCIAL = {"proxima_accion": 300, "motivo_perdida": 40, "fecha_demo": 10, "fecha_propuesta": 10,
+              "monto_implementacion": 12, "monto_mensual": 12}
 
 
 def next_action(L):
@@ -121,14 +128,48 @@ def next_action(L):
         return "—"
     if st == "calificado" and L["clasificacion"] == "C":
         return "Sin mensaje (clase C)"
-    a = NEXT_ACTION.get(st, "—")
+    a = L.get("proxima_accion") or NEXT_ACTION.get(st, "—")  # la acción concreta capturada por una persona tiene prioridad
     return f"{a} · {L['proximo_seguimiento']}" if L.get("proximo_seguimiento") else a
+
+
+def commercial_args(body):
+    args = []
+    for k, n in COMMERCIAL.items():
+        v = str(body.get(k) or "").strip()[:n]
+        if v:
+            args += ["--set", f"{k}={v}"]
+    return args
+
+
+def api_today():
+    """Lo que una persona debe hacer hoy (misma forma que cloudflare/src/views.js › todayView)."""
+    leads, fus = rows("leads"), rows("followups")
+    today = datetime.now(crm.TZ).date()
+    t, in7 = today.isoformat(), (today + timedelta(days=7)).isoformat()
+    finals = SCHEMA["x-estados-finales"]
+    nombre = {L["lead_id"]: L["nombre_negocio"] for L in leads}
+    s2 = lambda L: dict(lead_summary(L), accion=L.get("proxima_accion") or NEXT_ACTION.get(L["estado_pipeline"], ""),
+                        fecha=L.get("proximo_seguimiento", ""))
+    live = [L for L in leads if L["estado_pipeline"] not in finals and L.get("opt_out") != "true"]
+    by_fecha = lambda x: x.get("fecha") or ""
+    return {
+        "hoy": t,
+        "acciones": sorted([dict(s2(L), vencido=L["proximo_seguimiento"] < t) for L in live
+                            if L.get("proximo_seguimiento") and L["proximo_seguimiento"] <= t], key=by_fecha),
+        "sin_accion": [s2(L) for L in live if L["estado_pipeline"] in active_states() and not (L.get("proxima_accion") and L.get("proximo_seguimiento"))],
+        "por_enviar": [s2(L) for L in live if L["estado_pipeline"] == "aprobado"],
+        "por_aprobar": [s2(L) for L in live if L["estado_pipeline"] == "pendiente_aprobacion"],
+        "proximos": sorted([s2(L) for L in live if t < (L.get("proximo_seguimiento") or "") <= in7], key=by_fecha),
+        "seguimientos": [dict(f, negocio=nombre.get(f["lead_id"], ""), vencido=f["fecha_programada"] < t) for f in fus
+                         if f["estado"] not in ("enviado", "cancelado") and f["fecha_programada"] <= t],
+    }
 
 
 def lead_summary(L):
     keys = ["lead_id", "nombre_negocio", "nicho", "subnicho", "ciudad", "estado_mx", "sitio_web", "telefono_publico",
             "whatsapp_publico", "email_publico", "puntaje_total", "clasificacion", "estado_pipeline", "fecha_registro",
-            "fecha_fuente", "proximo_seguimiento", "aprobacion_estado", "fuente", "opt_out", "canal_preferido"]
+            "fecha_fuente", "proximo_seguimiento", "aprobacion_estado", "fuente", "opt_out", "canal_preferido",
+            "motivo_perdida", "fecha_demo", "fecha_propuesta", "monto_implementacion", "monto_mensual"]
     d = {k: L.get(k, "") for k in keys}
     d["proxima_accion"] = next_action(L)
     return d
@@ -174,10 +215,10 @@ def api_summary():
     leads, ints = rows("leads"), rows("interactions")
     today_s = datetime.now(crm.TZ).date().isoformat()
     ab = [L for L in leads if L["clasificacion"] in ("A", "B")]
-    contacted_states = {"contactado", "en_conversacion", "reunion_agendada", "propuesta_enviada", "ganado", "perdido", "pausado"}
+    contacted_states = active_states() | {"ganado", "perdido"}
     contactados = [L for L in leads if L.get("fecha_primer_contacto") or L["estado_pipeline"] in contacted_states]
     respuestas = [i for i in ints if i["direccion"] == "entrante"]
-    reuniones = {L["lead_id"] for L in leads if L["estado_pipeline"] in ("reunion_agendada", "propuesta_enviada", "ganado")}
+    reuniones = {L["lead_id"] for L in leads if L["estado_pipeline"] in ("reunion_agendada", "demo_realizada", "propuesta_enviada", "negociacion", "ganado")}
     reuniones |= {i["lead_id"] for i in ints if i["tipo"] == "reunion"}
     ganados = [L for L in leads if L["estado_pipeline"] == "ganado"]
     pend = staging_candidates()
@@ -262,8 +303,8 @@ def api_reports():
             g[L[key] or "—"]["total"] += 1
             g[L[key] or "—"][L["clasificacion"]] += 1
         return dict(g)
-    order = ["calificado", "mensaje_borrador", "pendiente_aprobacion", "aprobado", "contactado", "en_conversacion",
-             "reunion_agendada", "propuesta_enviada", "ganado"]
+    order = ["calificado", "mensaje_borrador", "pendiente_aprobacion", "aprobado", "contactado", "en_conversacion", "interesado",
+             "reunion_agendada", "demo_realizada", "propuesta_enviada", "negociacion", "ganado"]
     reached = Counter()
     for L in leads:
         hist = {i["resumen"].split(" → ")[1].split(".")[0] for i in rows("interactions")
@@ -368,6 +409,16 @@ LEAD_RE = r"(WW-\d{8}-\d{3})"
 
 
 def post_routes(path, body):
+    m = re.fullmatch(rf"/api/leads/{LEAD_RE}/next", path)
+    if m:
+        args = ["update-lead", m.group(1), *commercial_args(body)]
+        if body.get("proximo_seguimiento"):
+            args += ["--set", f"proximo_seguimiento={str(body['proximo_seguimiento'])[:10]}"]
+        if len(args) == 2:
+            return 422, {"ok": False, "error": "Nada que actualizar."}
+        if body.get("nota"):
+            args += ["--nota", str(body["nota"])[:500]]
+        return run_tool(args, actor_of(body))
     m = re.fullmatch(rf"/api/leads/{LEAD_RE}/transition", path)
     if m:
         to = str(body.get("to", ""))
@@ -375,7 +426,7 @@ def post_routes(path, body):
             return 422, {"ok": False, "error": "Para dar de baja usa la acción 'Registrar baja'."}
         if to == "aprobado":
             return 422, {"ok": False, "error": "Para aprobar usa el botón 'Aprobar para uso humano'."}
-        args = ["update-lead", m.group(1), "--set", f"estado_pipeline={to}"]
+        args = ["update-lead", m.group(1), "--set", f"estado_pipeline={to}", *commercial_args(body)]
         if body.get("proximo_seguimiento"):
             args += ["--set", f"proximo_seguimiento={body['proximo_seguimiento']}"]
         if to == "pendiente_aprobacion":
@@ -517,12 +568,14 @@ class Handler(BaseHTTPRequestHandler):
                 lim = min(int(q.get("limit", ["200"])[0]), 1000)
                 return self._json(200, {"eventos": audit_lines(limit=lim, since=q.get("since", [None])[0])})
             routes = {"/api/summary": api_summary, "/api/research": api_research, "/api/followups": api_followups,
-                      "/api/reports": api_reports, "/api/config": api_config,
+                      "/api/today": api_today, "/api/reports": api_reports, "/api/config": api_config,
                       "/api/leads": lambda: {"leads": [lead_summary(L) for L in rows("leads")]},
                       "/api/drafts": lambda: {"borradores": [dict(d, lead=lead_summary(crm.get_lead(rows("leads"), d["lead_id"])))
                                                              for d in draft_files() if d["lead_id"].startswith("WW-")]},
                       "/api/pipeline": lambda: {"estados": SCHEMA["$defs"]["estadoPipeline"]["enum"],
                                                 "transiciones": SCHEMA["x-transiciones"], "finales": SCHEMA["x-estados-finales"],
+                                                "con_seguimiento": SCHEMA["x-estados-con-seguimiento"],
+                                                "motivos_perdida": SCHEMA["$defs"]["motivoPerdida"]["enum"],
                                                 "leads": [lead_summary(L) for L in rows("leads")]}}
             if path in routes:
                 return self._json(200, routes[path]())
