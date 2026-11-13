@@ -11,6 +11,7 @@ const NICHO = { dentista: "Clínica dental", clinica: "Consultorio / clínica", 
   belleza: "Salón, barbería, uñas", fitness: "Gimnasio, yoga, pilates", inmobiliaria: "Inmobiliaria", autos: "Agencia de autos", energia_solar: "Paneles solares",
   construccion: "Construcción / remodelación", educacion: "Escuela / academia", viajes: "Agencia de viajes", industrial: "Proveedor industrial",
   retail: "Tienda / retail", distribucion: "Distribuidora / mayorista", otro: "Otro" };
+const CANAL = { whatsapp: "WhatsApp", email: "Correo", facebook_messenger: "Messenger", instagram_dm: "Instagram DM", formulario: "Formulario", llamada: "Llamada", telefono: "Llamada" };
 const CRITERIO = { citas: ["Citas o reservaciones", 20], whatsapp: ["WhatsApp comercial", 15], anuncios: ["Actividad publicitaria", 15], volumen: ["Volumen / reseñas", 10],
   tamano: ["Sucursales o personal", 10], problema: ["Problema operativo", 15], presencia: ["Presencia digital mejorable", 5], contacto: ["Contacto verificable", 10] };
 function scoreLine(L) {
@@ -87,8 +88,12 @@ function toast(msg, kind = "") {
   $("#toasts").append(t); setTimeout(() => t.remove(), kind === "bad" ? 9000 : 4500);
 }
 function badgeClass(c) { return h("span", { class: `badge ${c || "neutral"}` }, c === "descartado" ? "Desc." : c || "—"); }
+// Color del punto por etapa: lo que te toca (aprobar), en contacto, avanzando, cerrado, bloqueado.
+const STATE_GROUP = { mensaje_borrador: "todo", pendiente_aprobacion: "todo", aprobado: "todo", contactado: "contact", en_conversacion: "contact",
+  interesado: "won", reunion_agendada: "won", demo_realizada: "won", propuesta_enviada: "won", negociacion: "won", ganado: "won" };
 function stateEl(s) {
-  return h("span", { class: `state ${FINALS.includes(s) ? "final" : ""} ${s === "no_contactar" ? "blocked" : ""}` }, STATE_LABEL[s] || s);
+  const g = s === "no_contactar" ? "blocked" : FINALS.includes(s) ? "final" : STATE_GROUP[s] || "";
+  return h("span", { class: `state ${g}` }, STATE_LABEL[s] || s);
 }
 function skeleton(n = 4) { return h("div", { class: "grid kpis" }, Array.from({ length: n }, () => h("div", { class: "skeleton" }))); }
 
@@ -345,9 +350,9 @@ views.prospectos = async (v, param) => {
   const sel = (key, label, values, map = (x) => x) => h("select", { class: "input", "aria-label": label, onchange: (e) => { f[key] = e.target.value; draw(); } },
     h("option", { value: "" }, label), values.map((x) => h("option", { value: x }, map(x))));
   const body = h("tbody");
-  const cols = [["lead_id", "ID"], ["nombre_negocio", "Negocio"], ["nicho", "Nicho"], ["ciudad", "Ciudad"], ["sitio_web", "Sitio web", "hide-sm"],
-    ["telefono_publico", "Teléfono", "hide-sm"], ["whatsapp_publico", "WhatsApp", "hide-sm"], ["puntaje_total", "Puntos"], ["clasificacion", "Clase"],
-    ["estado_pipeline", "Estado"], ["fecha_registro", "Investigado", "hide-sm"], ["proxima_accion", "Próxima acción", "hide-sm"]];
+  const cols = [["nombre_negocio", "Negocio"], ["clasificacion", "Clase"], ["puntaje_total", "Puntos", "num"], ["estado_pipeline", "Estado"],
+    ["ciudad", "Ciudad"], ["whatsapp_publico", "Contacto", "hide-sm"], ["sitio_web", "Sitio web", "hide-lg"],
+    ["proxima_accion", "Próxima acción", "hide-md"], ["lead_id", "ID", "hide-lg"]];
   const thead = h("thead", {}, h("tr", {}, cols.map(([k, l, c]) => h("th", { class: `sortable ${c || ""}`, onclick: () => { sort = { k, dir: sort.k === k ? -sort.dir : 1 }; draw(); } }, l))));
   function draw() {
     const q = f.q.toLowerCase();
@@ -355,10 +360,14 @@ views.prospectos = async (v, param) => {
       && (!f.nicho || L.nicho === f.nicho) && (!f.clase || L.clasificacion === f.clase) && (!f.estado || L.estado_pipeline === f.estado) && (!f.ciudad || L.ciudad === f.ciudad))
       .sort((a, b) => { const x = a[sort.k], y = b[sort.k]; const n = sort.k === "puntaje_total"; return (n ? (+x - +y) : String(x).localeCompare(String(y))) * sort.dir; });
     body.replaceChildren(...(list.length ? list.map((L) => h("tr", { onclick: () => (location.hash = `#/prospectos/${L.lead_id}`), tabindex: "0", onkeydown: (e) => e.key === "Enter" && (location.hash = `#/prospectos/${L.lead_id}`) },
-      h("td", { class: "mono" }, L.lead_id), h("td", {}, h("strong", {}, L.nombre_negocio)), h("td", {}, NICHO[L.nicho] || L.nicho), h("td", {}, L.ciudad),
-      h("td", { class: "hide-sm" }, L.sitio_web ? h("a", { href: L.sitio_web, target: "_blank", rel: "noopener noreferrer", onclick: (e) => e.stopPropagation() }, L.sitio_web.replace(/^https?:\/\/(www\.)?/, "").slice(0, 28)) : h("span", { class: "faint" }, "sin sitio")),
-      h("td", { class: "hide-sm" }, L.telefono_publico || "—"), h("td", { class: "hide-sm" }, L.whatsapp_publico || "—"), h("td", { class: "num" }, L.puntaje_total),
-      h("td", {}, badgeClass(L.clasificacion)), h("td", {}, stateEl(L.estado_pipeline)), h("td", { class: "hide-sm" }, fmtDate(L.fecha_registro)), h("td", { class: "hide-sm muted" }, L.proxima_accion)))
+      h("td", { class: "biz" }, h("strong", {}, L.nombre_negocio), h("small", {}, NICHO[L.nicho] || L.nicho)),
+      h("td", {}, badgeClass(L.clasificacion)), h("td", { class: "num" }, L.puntaje_total), h("td", { class: "nowrap" }, stateEl(L.estado_pipeline)),
+      h("td", { class: "nowrap" }, L.ciudad),
+      h("td", { class: "hide-sm contact" }, L.whatsapp_publico ? h("span", {}, h("b", {}, "WA "), L.whatsapp_publico) : null,
+        L.telefono_publico && L.telefono_publico !== L.whatsapp_publico ? h("span", {}, h("b", {}, "Tel "), L.telefono_publico) : null,
+        !L.whatsapp_publico && !L.telefono_publico ? h("span", { class: "faint" }, "—") : null),
+      h("td", { class: "hide-lg site" }, L.sitio_web ? h("a", { href: L.sitio_web, target: "_blank", rel: "noopener noreferrer", onclick: (e) => e.stopPropagation() }, L.sitio_web.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")) : h("span", { class: "faint" }, "sin sitio")),
+      h("td", { class: "hide-md muted next" }, L.proxima_accion || h("span", { class: "faint" }, "—")), h("td", { class: "hide-lg mono nowrap faint" }, L.lead_id)))
       : [h("tr", {}, h("td", { colspan: cols.length, class: "empty" }, "Ningún prospecto coincide con los filtros."))]));
   }
   v.append(h("div", { class: "page-head" }, h("div", {}, h("h1", {}, "Prospectos"), h("p", {}, `${leads.length} registrados en el CRM.`)),
@@ -478,9 +487,9 @@ function draftCard(b, L, reload, compact = false) {
   return h("div", { class: "card" },
     h("div", { class: "row", style: "justify-content:space-between" },
       h("div", {}, compact ? null : h("a", { href: `#/prospectos/${b.lead_id}` }, h("strong", {}, L?.nombre_negocio || b.lead_id)), " ",
-        h("span", { class: "badge info" }, b.meta.canal || "—"), " ", h("span", { class: "badge neutral" }, `envío: ${b.meta.envio || "manual"}`), " ",
-        isRef ? h("span", { class: "badge neutral" }, "solo referencia (clase C)") : h("span", { class: `badge ${L?.aprobacion_estado === "aprobado" ? "ok" : "warn"}` }, `aprobación: ${L?.aprobacion_estado || "—"}`), " ",
-        h("span", { class: `badge ${comp.startsWith("aprobado") ? "ok" : comp.startsWith("bloq") ? "bad" : "warn"}` }, `cumplimiento: ${comp || "—"}`)),
+        h("span", { class: "badge info" }, CANAL[b.meta.canal] || b.meta.canal || "—"), " ",
+        isRef ? h("span", { class: "badge neutral" }, "Solo referencia (clase C)") : h("span", { class: `badge ${L?.aprobacion_estado === "aprobado" ? "ok" : "warn"}` }, L?.aprobacion_estado === "aprobado" ? "Aprobado" : L?.aprobacion_estado === "pendiente" ? "Por aprobar" : (L?.aprobacion_estado || "—")), " ",
+        h("span", { class: `badge ${comp.startsWith("aprobado") ? "ok" : comp.startsWith("bloq") ? "bad" : "warn"}` }, comp.startsWith("aprobado") ? "Cumplimiento OK" : comp.startsWith("bloq") ? "Bloqueado por cumplimiento" : `Cumplimiento: ${comp || "—"}`)),
       h("div", { class: "row" }, h("button", { class: "btn", onclick: async () => { try { await navigator.clipboard.writeText(copyText); toast("Mensaje copiado. Recuerda: lo envía una persona.", "ok"); } catch { toast("No se pudo copiar automáticamente; selecciona el texto.", "bad"); } } }, "Copiar"),
         !isRef && L?.estado_pipeline === "pendiente_aprobacion" ? [h("button", { class: "btn primary", onclick: () => approveLead(L, reload) }, "Aprobar para uso humano"), h("button", { class: "btn", onclick: () => requestChanges(L, reload) }, "Pedir cambios")] : null)),
     b.aviso ? h("div", { style: "margin-top:12px" }, md(b.aviso)) : null,
@@ -493,9 +502,21 @@ function draftCard(b, L, reload, compact = false) {
 
 views.mensajes = async (v) => {
   const { borradores } = await api("/api/drafts"); const reload = () => route();
-  v.append(h("div", { class: "page-head" }, h("div", {}, h("h1", {}, "Mensajes"), h("p", {}, "Borradores personalizados. Copiar y aprobar nunca envía nada."))),
+  const pend = borradores.filter((b) => b.lead?.estado_pipeline === "pendiente_aprobacion");
+  let only = pend.length > 0;
+  const list = h("div", { class: "stack" });
+  const tabs = h("div", { class: "seg", role: "tablist", "aria-label": "Filtrar borradores" });
+  function draw() {
+    const shown = only ? pend : borradores;
+    tabs.replaceChildren(
+      h("button", { role: "tab", "aria-selected": String(only), class: only ? "active" : "", onclick: () => { only = true; draw(); } }, `Por aprobar (${pend.length})`),
+      h("button", { role: "tab", "aria-selected": String(!only), class: only ? "" : "active", onclick: () => { only = false; draw(); } }, `Todos (${borradores.length})`));
+    list.replaceChildren(...(shown.length ? shown.map((b) => draftCard(b, b.lead, reload)) : [h("div", { class: "card empty" }, only ? "Nada por aprobar. Buen trabajo." : "No hay borradores.")]));
+  }
+  v.append(h("div", { class: "page-head" }, h("div", {}, h("h1", {}, "Mensajes"), h("p", {}, "Borradores personalizados. Copiar y aprobar nunca envía nada.")), tabs),
     h("div", { class: "notice safe", style: "margin-bottom:16px" }, "Aprobar marca el borrador como listo para que una persona lo envíe desde su propia cuenta, el día hábil indicado. No hay ningún mecanismo de envío conectado."),
-    borradores.length ? h("div", { class: "stack" }, borradores.map((b) => draftCard(b, b.lead, reload))) : h("div", { class: "card empty" }, "No hay borradores."));
+    list);
+  draw();
 };
 
 views.hoy = async (v) => {

@@ -665,8 +665,11 @@ class Handler(BaseHTTPRequestHandler):
             routes = {"/api/summary": api_summary, "/api/research": api_research, "/api/followups": api_followups,
                       "/api/today": api_today, "/api/reports": api_reports, "/api/config": api_config,
                       "/api/leads": lambda: {"leads": [lead_summary(L) for L in rows("leads")]},
-                      "/api/drafts": lambda: {"borradores": [dict(d, lead=lead_summary(crm.get_lead(rows("leads"), d["lead_id"])))
-                                                             for d in draft_files() if d["lead_id"].startswith("WW-")]},
+                      # Los borradores de leads que viven solo en D1 (IDs 500+) no tienen fila en el CSV local: se omiten
+                      # en vez de romper la vista completa.
+                      "/api/drafts": lambda: (lambda L: {"borradores": [dict(d, lead=lead_summary(L[d["lead_id"]]))
+                                                                        for d in draft_files() if d["lead_id"] in L]})(
+                                                 {x["lead_id"]: x for x in rows("leads")}),
                       "/api/pipeline": lambda: {"estados": SCHEMA["$defs"]["estadoPipeline"]["enum"],
                                                 "transiciones": SCHEMA["x-transiciones"], "finales": SCHEMA["x-estados-finales"],
                                                 "con_seguimiento": SCHEMA["x-estados-con-seguimiento"],
