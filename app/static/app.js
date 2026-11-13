@@ -242,6 +242,29 @@ async function markSent(L, after) {
   catch (e) { toast(`El envío quedó registrado, pero no se pudo mover a «Primer contacto»: ${e.message}. Muévelo desde la ficha.`, "bad"); }
   after();
 }
+// «Abrir en WhatsApp» (policies/consent.md §2: manual, una persona, uno a uno, al número que el negocio publica, tras aprobación).
+// Solo arma un enlace wa.me con el texto escrito; quien envía es la persona, en su WhatsApp. El CRM no envía nada.
+function waNumber(raw) {
+  const d = String(raw || "").replace(/\D/g, "");
+  if (d.length === 10) return `52${d}`;                      // número nacional de 10 dígitos
+  if (d.length === 12 && d.startsWith("52")) return d;         // +52 + 10 dígitos
+  if (d.length === 13 && d.startsWith("521")) return `52${d.slice(3)}`;  // formato móvil antiguo
+  return null;
+}
+function waLink(raw, text) { const n = waNumber(raw); return n ? `https://wa.me/${n}?text=${encodeURIComponent(text)}` : null; }
+const sendableDraft = (L, b) => L?.estado_pipeline === "aprobado" && b && !(b.meta?.estado || "").startsWith("no_elegible") && waNumber(L.whatsapp_publico);
+async function openWhatsApp(L, b) {
+  const url = sendableDraft(L, b) ? waLink(L.whatsapp_publico, b.mensaje || "") : null;
+  if (!url) return toast("Solo se abre WhatsApp para leads aprobados con un WhatsApp publicado y completo.", "bad");
+  const verif = (b.verificacion || "").replace(/^[-*]\s*/gm, "• ").replace(/\*\*/g, "").trim();
+  const ok = await modal({ title: "Abrir en WhatsApp", confirm: "Abrir WhatsApp",
+    text: `Se abrirá WhatsApp con el mensaje ya escrito para ${L.nombre_negocio} (+${waNumber(L.whatsapp_publico)}). Tú lo revisas y presionas Enviar; el CRM no envía nada.`
+      + (verif ? `\n\nAntes de enviar, verifica:\n${verif}` : ""),
+    checks: ["Revisé la verificación previa y confirmé que este número es el WhatsApp que publica el negocio."] });
+  if (!ok) return;
+  const a = h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }); document.body.append(a); a.click(); a.remove();
+  toast("WhatsApp abierto con el mensaje escrito. Cuando lo envíes, regresa y presiona «Marcar como enviado».", "ok");
+}
 async function copyText(text, okMsg = "Copiado.") {
   try { await navigator.clipboard.writeText(text); toast(okMsg, "ok"); } catch { toast("No se pudo copiar automáticamente; selecciona el texto.", "bad"); }
 }
@@ -500,7 +523,9 @@ async function leadDetail(v, id) {
   const idx = nav ? nav.ids.indexOf(id) : -1;
   const goRel = (step) => { const n = nav?.ids[idx + step]; if (n) location.hash = `#/prospectos/${n}`; };
   const actions = d.bloqueado ? h("div", { class: "notice bad" }, "Dado de baja / no contactar. El sistema impide cualquier cambio o reactivación.")
-    : h("div", { class: "row lead-actions" }, primaryAction(L, reload), transitionSelect(L, d.transiciones, reload),
+    : h("div", { class: "row lead-actions" }, primaryAction(L, reload),
+      (() => { const wb = d.borradores.find((b) => !(b.meta?.estado || "").startsWith("no_elegible")); return sendableDraft(L, wb) ? h("button", { class: "btn", onclick: () => openWhatsApp(L, wb) }, "Abrir en WhatsApp") : null; })(),
+      transitionSelect(L, d.transiciones, reload),
       h("details", { class: "menu" }, h("summary", { class: "btn" }, "Más acciones"),
         h("div", { class: "menu-list" },
           L.estado_pipeline === "pendiente_aprobacion" ? [h("button", { class: "menu-item", onclick: () => approveLead(L, reload) }, "Aprobar para uso humano"), h("button", { class: "menu-item", onclick: () => requestChanges(L, reload) }, "Pedir cambios")] : null,
@@ -676,7 +701,8 @@ views.mensajes = async (v, param) => {
          h("button", { class: "btn", onclick: () => requestChanges(L, after) }, "Pedir cambios", h("kbd", {}, "C")),
          h("button", { class: "btn ghost", onclick: () => copyText(text, "Mensaje copiado.") }, "Copiar")]
       : g === "enviar"
-      ? [h("button", { class: "btn primary", onclick: () => copyText(text, "Mensaje copiado. Recuerda: lo envía una persona desde su cuenta.") }, "Copiar mensaje"),
+      ? [sendableDraft(L, b) ? h("button", { class: "btn primary", onclick: () => openWhatsApp(L, b) }, "Abrir en WhatsApp") : null,
+         h("button", { class: `btn ${sendableDraft(L, b) ? "" : "primary"}`, onclick: () => copyText(text, "Mensaje copiado. Recuerda: lo envía una persona desde su cuenta.") }, "Copiar mensaje"),
          h("button", { class: "btn", onclick: () => markSent(L, after) }, icon("check"), "Marcar como enviado")]
       : [h("button", { class: "btn", onclick: () => copyText(text, "Mensaje copiado.") }, "Copiar")];
     detail.replaceChildren(h("div", { class: "card rv-card" },
