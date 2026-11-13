@@ -37,11 +37,14 @@ const nav = mk("nav", "nav", "nav");
 for (const r of ["dashboard", "prospectos", "pipeline", "investigacion", "mensajes", "seguimientos", "reportes", "configuracion"]) { const a = mk("a"); a.setAttribute("data-route", r); nav.append(a); }
 const sidebar = mk("aside", "sidebar", "sidebar"); sidebar.append(nav, mk("span", "c-leads"), mk("span", "c-review"), mk("span", "c-drafts"));
 const layout = mk("div", null, "layout"); const navP = mk("a", "nav-prospeccion"); navP.setAttribute("data-route", "prospeccion"); nav.append(navP);
-body.append(layout, mk("button", "logout-btn"), mk("div", "banner"), sidebar, mk("strong", "page-title"), mk("span", "env-badge"), mk("button", "who-btn"), mk("span", "who-name"), mk("button", "menu-btn"), mk("main", "view"), mk("div", "toasts"));
+body.append(layout, mk("button", "logout-btn"), mk("div", "banner"), sidebar, mk("span", "c-today"), mk("div", "scrim"), mk("button", "search-btn"), mk("strong", "page-title"), mk("span", "env-badge"), mk("button", "who-btn"), mk("span", "who-name"), mk("button", "menu-btn"), mk("main", "view"), mk("div", "toasts"));
 const winListeners = {};
-globalThis.document = { createElement: (t) => new El(t), createTextNode: (t) => new Text_(t), querySelector: (s) => body.querySelector(s), querySelectorAll: (s) => body.querySelectorAll(s), body };
+const docListeners = {};
+globalThis.document = { createElement: (t) => new El(t), createElementNS: (_ns, t) => new El(t), createTextNode: (t) => new Text_(t), querySelector: (s) => body.querySelector(s),
+  querySelectorAll: (s) => body.querySelectorAll(s), body, title: "", activeElement: null,
+  addEventListener: (t, f) => (docListeners[t] ||= []).push(f), removeEventListener: (t, f) => { docListeners[t] = (docListeners[t] || []).filter((x) => x !== f); } };
 globalThis.Node = Node_;
-globalThis.window = { addEventListener: (t, f) => (winListeners[t] ||= []).push(f) };
+globalThis.window = { addEventListener: (t, f) => (winListeners[t] ||= []).push(f), scrollTo: () => {} };
 globalThis.location = { hash: "#/dashboard" };
 const store = {}; globalThis.localStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => (store[k] = String(v)) };
 const realFetch = globalThis.fetch;
@@ -66,6 +69,19 @@ await import(new URL("../app/static/app.js", import.meta.url));
 await settle();
 let fails = 0;
 for (const [route, text] of checks) {
+  if (route.startsWith("buscar:")) {  // búsqueda global: abre con «/», escribe y revisa resultados
+    (docListeners.keydown || []).forEach((f) => f({ key: "/", target: body, preventDefault() {} }));
+    for (let i = 0; i < 40 && !body.querySelector("#palette-q"); i++) await new Promise((r) => setTimeout(r, 50));
+    const q = body.querySelector("#palette-q"); const pal = body.querySelector("#palette");
+    let ok = false, t = "";
+    if (q) { q.value = route.slice(7);
+      for (let i = 0; i < 60; i++) { (q.listeners.input || []).forEach((f) => f({ target: q })); t = body.querySelector("#palette-list")?.textContent || ""; if (t.includes(text)) { ok = true; break; } await new Promise((r) => setTimeout(r, 50)); } }
+    (docListeners.keydown || []).forEach((f) => f({ key: "Escape", target: q, preventDefault() {} }));
+    const closed = !body.querySelector("#palette");
+    if (!ok || !closed || !pal) fails++;
+    console.log(`${ok && closed ? "OK   " : "FALLA"} búsqueda «${route.slice(7)}» encuentra «${text}»${ok ? "" : " → " + t.slice(0, 200)}${closed ? "" : " (Esc no cerró)"}`);
+    continue;
+  }
   location.hash = `#/${route}`; (winListeners.hashchange || []).forEach((f) => f()); await settle();
   const t = view.textContent;
   const ok = t.includes(text) && !t.includes("No se pudo cargar");

@@ -101,6 +101,7 @@ def draft_files(lead_id=None):
                     "asunto": secs.get("Asunto (solo email)", ""), "mensaje": secs.get("Mensaje", ""),
                     "variante_b": secs.get("Variante B (opcional, otro gancho)", ""),
                     "trazabilidad": secs.get("Trazabilidad", ""), "notas": secs.get("Notas para quien aprueba", ""),
+                    "verificacion": secs.get("Verificación previa al envío", ""),
                     "cumplimiento": next((secs[k] for k in reversed(list(secs)) if k.startswith("Revisión de cumplimiento")), ""),
                     "historial": secs.get("Historial", ""),
                     "aviso": secs.get("_intro", ""), "markdown": body})
@@ -169,7 +170,7 @@ def lead_summary(L):
     keys = ["lead_id", "nombre_negocio", "nicho", "subnicho", "ciudad", "estado_mx", "sitio_web", "telefono_publico",
             "whatsapp_publico", "email_publico", "puntaje_total", "clasificacion", "estado_pipeline", "fecha_registro",
             "fecha_fuente", "proximo_seguimiento", "aprobacion_estado", "fuente", "opt_out", "canal_preferido",
-            "motivo_perdida", "fecha_demo", "fecha_propuesta", "monto_implementacion", "monto_mensual"]
+            "motivo_perdida", "fecha_demo", "fecha_propuesta", "monto_implementacion", "monto_mensual", "fecha_actualizacion"]
     d = {k: L.get(k, "") for k in keys}
     d["proxima_accion"] = next_action(L)
     return d

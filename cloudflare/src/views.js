@@ -18,7 +18,7 @@ const S = (v) => (v == null ? "" : String(v));
 export function leadSummary(L) {
   const keys = ["lead_id", "nombre_negocio", "nicho", "subnicho", "ciudad", "estado_mx", "sitio_web", "telefono_publico", "whatsapp_publico", "email_publico",
     "puntaje_total", "clasificacion", "estado_pipeline", "fecha_registro", "fecha_fuente", "proximo_seguimiento", "aprobacion_estado", "fuente", "opt_out", "canal_preferido",
-    "motivo_perdida", "fecha_demo", "fecha_propuesta", "monto_implementacion", "monto_mensual"];
+    "motivo_perdida", "fecha_demo", "fecha_propuesta", "monto_implementacion", "monto_mensual", "fecha_actualizacion"];
   return { ...Object.fromEntries(keys.map((k) => [k, S(L[k])])), proxima_accion: nextAction(L) };
 }
 const counter = (arr, f) => arr.reduce((m, x) => ((m[f(x)] = (m[f(x)] || 0) + 1), m), {});
@@ -70,7 +70,7 @@ export function parseDraft(doc) {
   const comp = Object.keys(secs).reverse().find((k) => k.startsWith("Revisión de cumplimiento"));
   return { archivo: doc.path, lead_id: meta.lead_id || doc.lead_id, meta, version: doc.version, asunto: secs["Asunto (solo email)"] || "", mensaje: secs["Mensaje"] || "",
     variante_b: secs["Variante B (opcional, otro gancho)"] || "", trazabilidad: secs["Trazabilidad"] || "", notas: secs["Notas para quien aprueba"] || "",
-    cumplimiento: comp ? secs[comp] : "", historial: secs["Historial"] || "", aviso: secs._intro || "", markdown: body };
+    verificacion: secs["Verificación previa al envío"] || "", cumplimiento: comp ? secs[comp] : "", historial: secs["Historial"] || "", aviso: secs._intro || "", markdown: body };
 }
 
 export async function leadDetail(env, id, L) {

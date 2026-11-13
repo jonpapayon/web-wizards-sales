@@ -3,41 +3,73 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0c11">
   <title>Web Wizards Sales OS</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <!-- Íconos (trazo 2 px, estilo Lucide). Se usan con <svg class="i"><use href="#i-…"/></svg> -->
+  <svg xmlns="http://www.w3.org/2000/svg" class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-today" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="m9 16 2 2 4-4"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-kanban" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 7v7M12 7v4M16 7v9"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></symbol>
+    <symbol id="i-report" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+    <symbol id="i-empty" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7M12 11v10"/></symbol>
+    <symbol id="i-mark" viewBox="0 0 24 24"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/></symbol>
+  </svg>
+
+  <a class="skip" href="#view">Saltar al contenido</a>
   <div id="banner"></div>
   <div class="layout">
-    <aside class="sidebar" id="sidebar">
-      <div class="brand"><div class="logo">✦</div><div>Web Wizards<small>Sales OS</small></div></div>
+    <aside class="sidebar" id="sidebar" aria-label="Navegación principal">
+      <div class="brand"><div class="logo" aria-hidden="true"><svg class="i"><use href="#i-mark"/></svg></div><div>Web Wizards<small>Sales OS</small></div></div>
       <nav class="nav" id="nav">
-        <a href="#/hoy" data-route="hoy"><span class="ico">☀</span>Hoy<span class="count" id="c-today"></span></a>
-        <a href="#/dashboard" data-route="dashboard"><span class="ico">◧</span>Dashboard</a>
-        <a href="#/prospectos" data-route="prospectos"><span class="ico">☰</span>Prospectos<span class="count" id="c-leads"></span></a>
-        <a href="#/pipeline" data-route="pipeline"><span class="ico">▥</span>Pipeline</a>
-        <a href="#/prospeccion" data-route="prospeccion" id="nav-prospeccion" hidden><span class="ico">✦</span>Prospección</a>
-        <a href="#/investigacion" data-route="investigacion"><span class="ico">⌕</span>Investigación<span class="count" id="c-review"></span></a>
-        <a href="#/mensajes" data-route="mensajes"><span class="ico">✉</span>Mensajes<span class="count" id="c-drafts"></span></a>
-        <a href="#/seguimientos" data-route="seguimientos"><span class="ico">↻</span>Seguimientos</a>
-        <a href="#/reportes" data-route="reportes"><span class="ico">▤</span>Reportes</a>
-        <a href="#/configuracion" data-route="configuracion"><span class="ico">⚙</span>Configuración</a>
+        <div class="nav-group">Trabajo</div>
+        <a href="#/hoy" data-route="hoy"><svg class="i" aria-hidden="true"><use href="#i-today"/></svg>Hoy<span class="count" id="c-today"></span></a>
+        <a href="#/mensajes" data-route="mensajes"><svg class="i" aria-hidden="true"><use href="#i-inbox"/></svg>Aprobar mensajes<span class="count warn" id="c-drafts"></span></a>
+        <a href="#/seguimientos" data-route="seguimientos"><svg class="i" aria-hidden="true"><use href="#i-repeat"/></svg>Seguimientos</a>
+
+        <div class="nav-group">Clientes</div>
+        <a href="#/prospectos" data-route="prospectos"><svg class="i" aria-hidden="true"><use href="#i-users"/></svg>Prospectos<span class="count" id="c-leads"></span></a>
+        <a href="#/pipeline" data-route="pipeline"><svg class="i" aria-hidden="true"><use href="#i-kanban"/></svg>Pipeline</a>
+
+        <div class="nav-group">Prospección</div>
+        <a href="#/investigacion" data-route="investigacion"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg>Investigación<span class="count" id="c-review"></span></a>
+        <a href="#/prospeccion" data-route="prospeccion" id="nav-prospeccion" hidden><svg class="i" aria-hidden="true"><use href="#i-compass"/></svg>Buscar negocios</a>
+
+        <div class="nav-group">Análisis</div>
+        <a href="#/dashboard" data-route="dashboard"><svg class="i" aria-hidden="true"><use href="#i-chart"/></svg>Rendimiento</a>
+        <a href="#/configuracion" data-route="configuracion"><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg>Configuración</a>
       </nav>
-      <div class="foot"><span class="safe">● Envíos bloqueados</span><br>Este sistema no envía mensajes ni llena formularios. Aprobar = listo para que una persona lo use.</div>
+      <div class="foot"><span class="safe"><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg>Envíos bloqueados</span>Este sistema no envía mensajes ni llena formularios. Aprobar = listo para que una persona lo use.</div>
     </aside>
+    <div class="scrim" id="scrim" hidden></div>
     <div class="main">
       <header class="topbar">
-        <button class="btn ghost menu-btn" id="menu-btn" aria-label="Abrir menú">☰</button>
-        <strong id="page-title">Dashboard</strong>
+        <button class="btn ghost icon-btn menu-btn" id="menu-btn" aria-label="Abrir menú" aria-expanded="false" aria-controls="sidebar"><svg class="i"><use href="#i-menu"/></svg></button>
+        <strong id="page-title">Hoy</strong>
+        <button class="searchbox" id="search-btn" type="button" aria-label="Buscar prospecto (atajo: /)"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><span>Buscar prospecto…</span><kbd>/</kbd></button>
         <div class="spacer"></div>
         <span class="badge neutral" id="env-badge">…</span>
         <button class="btn sm" id="who-btn" title="Tu nombre se usa para registrar aprobaciones y acciones">Tú: <span id="who-name">sin nombre</span></button>
-        <button class="btn sm ghost" id="logout-btn" hidden>Salir</button>
+        <button class="btn sm ghost" id="logout-btn" hidden><svg class="i" aria-hidden="true"><use href="#i-logout"/></svg>Salir</button>
       </header>
-      <main class="content" id="view" aria-live="polite"></main>
+      <main class="content" id="view" tabindex="-1" aria-live="polite"></main>
     </div>
   </div>
-  <div class="toasts" id="toasts"></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
   <script src="/app.js" type="module"></script>
 </body>
 </html>

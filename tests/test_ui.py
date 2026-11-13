@@ -109,7 +109,7 @@ class RenderWithoutBrowser(unittest.TestCase):
     def test_demo_all_sections(self):
         root = temp_root()
         try:
-            out = self.run_render(root, ["hoy=Activos sin próxima acción", "dashboard=Objetivo diario", "prospectos=DEMO Spa Luna", "pipeline=Demo programada",
+            out = self.run_render(root, ["hoy=Por aprobar", "hoy=Próximos 7 días", "dashboard=Objetivo diario", "prospectos=DEMO Spa Luna", "buscar:luna=DEMO Spa Luna", "buscar:0000 0004=DEMO Consultorio", "pipeline=Demo programada",
                                          "investigacion=Área de revisión", "mensajes=Copiar", "seguimientos=Próximas acciones",
                                          "reportes=Conversión por etapa", "configuracion=Reglas de aprobación automática"])
             self.assertIn("MODO DEMOSTRACIÓN", out)
